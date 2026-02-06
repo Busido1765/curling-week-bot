@@ -1,0 +1,1 @@
+# curling-week-bot
