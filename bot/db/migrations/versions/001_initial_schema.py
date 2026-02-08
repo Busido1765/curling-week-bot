@@ -1,3 +1,5 @@
+# NOTE: Initial migration assumes a clean database (no pre-existing enums)
+
 """initial schema
 
 Revision ID: 001_initial_schema
