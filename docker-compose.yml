@@ -7,8 +7,8 @@ services:
       POSTGRES_USER: curling_user
       POSTGRES_PASSWORD: curling_password
       POSTGRES_DB: curling_db
-    ports:
-      - "5432:5432"
+    #ports:
+    #  - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
@@ -20,6 +20,7 @@ services:
       - .env
     environment:
       DATABASE_URL: postgresql+asyncpg://curling_user:curling_password@postgres:5432/curling_db
+      PYTHONPATH: /app
 
 volumes:
   postgres_data:

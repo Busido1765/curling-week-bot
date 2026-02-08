@@ -21,6 +21,7 @@ status_enum = sa.Enum(
     "SUBSCRIPTION_VERIFIED",
     "CONFIRMED",
     name="registrationstatus",
+    create_type=False,   # <-- Запретил SQLAlchemy при создании таблицы создать тот же enum ещё раз
 )
 
 
