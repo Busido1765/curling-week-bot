@@ -3,6 +3,7 @@
 services:
   postgres:
     image: postgres:15
+    restart: unless-stopped
     environment:
       POSTGRES_USER: curling_user
       POSTGRES_PASSWORD: curling_password
@@ -14,6 +15,7 @@ services:
 
   bot:
     build: .
+    restart: unless-stopped
     depends_on:
       - postgres
     env_file:
