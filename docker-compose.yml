@@ -33,7 +33,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://curling_user:curling_password@postgres:5432/curling_db
       PYTHONPATH: /app
 
-      logging:
+    logging:
       driver: "json-file"
       options:
         max-size: "10m"
