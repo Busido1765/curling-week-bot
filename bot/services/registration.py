@@ -41,7 +41,7 @@ class RegistrationService:
 
                 if token is None:
                     await self._user_repository.set_status(
-                        session, user, RegistrationStatus.none
+                        session, user, RegistrationStatus.NONE
                     )
                     current_status = user.status
                     logger.info(
@@ -66,11 +66,11 @@ class RegistrationService:
 
                 if token_valid:
                     if user.status in {
-                        RegistrationStatus.none,
-                        RegistrationStatus.token_verified,
+                        RegistrationStatus.NONE,
+                        RegistrationStatus.TOKEN_VERIFIED,
                     }:
                         await self._user_repository.set_status(
-                            session, user, RegistrationStatus.token_verified
+                            session, user, RegistrationStatus.TOKEN_VERIFIED
                         )
                 current_status = user.status
 
@@ -93,7 +93,7 @@ class RegistrationService:
         user = await self._user_repository.get_by_tg_id(session, tg_id)
         if user is None:
             user = await self._user_repository.create(
-                session, tg_id, username, RegistrationStatus.none
+                session, tg_id, username, RegistrationStatus.NONE
             )
             return user
 
