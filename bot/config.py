@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     database_url: str
     jwt_secret: str
     admin_ids: List[int]
-    required_channel_id: int
+    required_channel_id: int | None = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

@@ -5,6 +5,7 @@ import time
 from dataclasses import dataclass
 
 from aiogram import Bot
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.enums import ChatMemberStatus
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -22,6 +23,7 @@ class SubscriptionCheckResult:
     rate_limited: bool
     eligible: bool
     is_member: bool | None
+    error_message: str | None
 
 
 class SubscriptionCheckerService:
@@ -48,6 +50,7 @@ class SubscriptionCheckerService:
                 rate_limited=True,
                 eligible=False,
                 is_member=None,
+                error_message=None,
             )
         _last_check_by_user[tg_id] = now
 
@@ -73,11 +76,27 @@ class SubscriptionCheckerService:
                         rate_limited=False,
                         eligible=False,
                         is_member=None,
+                        error_message=None,
                     )
 
-                chat_member = await self._bot.get_chat_member(
-                    self._required_channel_id, tg_id
-                )
+                try:
+                    chat_member = await self._bot.get_chat_member(
+                        self._required_channel_id, tg_id
+                    )
+                except (TelegramForbiddenError, TelegramBadRequest) as exc:
+                    logger.error(
+                        "Failed to check subscription for tg_id=%s: %s",
+                        tg_id,
+                        exc,
+                    )
+                    return SubscriptionCheckResult(
+                        rate_limited=False,
+                        eligible=True,
+                        is_member=None,
+                        error_message=(
+                            "Боту нужны права администратора в канале для проверки подписки"
+                        ),
+                    )
                 status = chat_member.status
                 is_member = status in {
                     ChatMemberStatus.MEMBER,
@@ -100,4 +119,5 @@ class SubscriptionCheckerService:
                     rate_limited=False,
                     eligible=True,
                     is_member=is_member,
+                    error_message=None,
                 )
