@@ -1,5 +1,3 @@
-#version: "3.9"
-
 services:
   postgres:
     image: postgres:15
@@ -8,8 +6,6 @@ services:
       POSTGRES_USER: curling_user
       POSTGRES_PASSWORD: curling_password
       POSTGRES_DB: curling_db
-    #ports:
-    #  - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
@@ -25,7 +21,6 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-
 
   bot:
     build: .
