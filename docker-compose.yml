@@ -13,6 +13,20 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U curling_user -d curling_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+
   bot:
     build: .
     restart: unless-stopped
@@ -23,6 +37,12 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://curling_user:curling_password@postgres:5432/curling_db
       PYTHONPATH: /app
+
+      logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   postgres_data:
