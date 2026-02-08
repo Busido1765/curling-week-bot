@@ -8,6 +8,7 @@ Create Date: 2024-01-01 00:00:00.000000
 """
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 
 # revision identifiers, used by Alembic.
@@ -17,7 +18,7 @@ branch_labels = None
 depends_on = None
 
 
-status_enum = sa.Enum(
+status_enum = postgresql.ENUM(
     "NONE",
     "TOKEN_VERIFIED",
     "SUBSCRIPTION_VERIFIED",
@@ -27,19 +28,9 @@ status_enum = sa.Enum(
 )
 
 
-def _status_enum_type() -> sa.Enum:
-    return sa.Enum(
-        "NONE",
-        "TOKEN_VERIFIED",
-        "SUBSCRIPTION_VERIFIED",
-        "CONFIRMED",
-        name="registrationstatus",
-    )
-
-
 def upgrade() -> None:
     bind = op.get_bind()
-    _status_enum_type().create(bind, checkfirst=True)
+    status_enum.create(bind, checkfirst=True)
 
     op.create_table(
         "users",
@@ -73,4 +64,4 @@ def downgrade() -> None:
     op.drop_table("posts")
     op.drop_table("users")
     bind = op.get_bind()
-    _status_enum_type().drop(bind, checkfirst=True)
+    status_enum.drop(bind, checkfirst=True)
