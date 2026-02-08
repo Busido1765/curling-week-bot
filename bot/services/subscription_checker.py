@@ -23,6 +23,7 @@ class SubscriptionCheckResult:
     rate_limited: bool
     eligible: bool
     is_member: bool | None
+    confirmed_now: bool
     error_message: str | None
 
 
@@ -50,6 +51,7 @@ class SubscriptionCheckerService:
                 rate_limited=True,
                 eligible=False,
                 is_member=None,
+                confirmed_now=False,
                 error_message=None,
             )
         _last_check_by_user[tg_id] = now
@@ -76,6 +78,7 @@ class SubscriptionCheckerService:
                         rate_limited=False,
                         eligible=False,
                         is_member=None,
+                        confirmed_now=False,
                         error_message=None,
                     )
 
@@ -93,6 +96,7 @@ class SubscriptionCheckerService:
                         rate_limited=False,
                         eligible=True,
                         is_member=None,
+                        confirmed_now=False,
                         error_message=(
                             "Боту нужны права администратора в канале для проверки подписки"
                         ),
@@ -110,14 +114,17 @@ class SubscriptionCheckerService:
                     status,
                 )
 
+                confirmed_now = False
                 if is_member and user.status != RegistrationStatus.CONFIRMED:
                     await self._user_repository.set_status(
                         session, user, RegistrationStatus.CONFIRMED
                     )
+                    confirmed_now = True
 
                 return SubscriptionCheckResult(
                     rate_limited=False,
                     eligible=True,
                     is_member=is_member,
+                    confirmed_now=confirmed_now,
                     error_message=None,
                 )

@@ -4,13 +4,22 @@ from aiogram import F, Router
 from aiogram.filters import CommandStart
 from aiogram.types import CallbackQuery, Message
 
+from bot.keyboards import (
+    CONTACTS_BUTTON,
+    FAQ_BUTTON,
+    PHOTO_BUTTON,
+    SCHEDULE_BUTTON,
+    confirmed_menu_keyboard,
+)
 from bot.keyboards.subscription import (
     CHECK_SUBSCRIPTION_CALLBACK,
     subscription_check_keyboard,
 )
+from bot.models import RegistrationStatus
 from bot.services.registration import RegistrationService
 from bot.services.subscription_checker import SubscriptionCheckerService
 from bot.services.token_verifier import get_token_verifier
+from bot.services.user_status import UserStatusService
 from bot.storage import UserRepository
 
 router = Router()
@@ -90,9 +99,30 @@ async def check_subscription_handler(callback: CallbackQuery) -> None:
         return
 
     if result.is_member:
-        await callback.message.answer("Подписка подтверждена ✅")
+        reply_markup = None
+        if result.confirmed_now:
+            reply_markup = confirmed_menu_keyboard()
+        await callback.message.answer("Подписка подтверждена ✅", reply_markup=reply_markup)
         return
 
     await callback.message.answer(
         "Ты не подписан на канал. Подпишись и нажми кнопку ещё раз."
     )
+
+
+@router.message(
+    F.text
+    & ~F.text.startswith("/")
+    & ~F.text.in_({SCHEDULE_BUTTON, FAQ_BUTTON, CONTACTS_BUTTON, PHOTO_BUTTON})
+)
+async def confirmed_user_fallback(message: Message) -> None:
+    if message.from_user is None:
+        return
+    service = UserStatusService(
+        session_maker=message.bot.session_maker,
+        user_repository=UserRepository(),
+    )
+    status = await service.get_status(message.from_user.id)
+    if status != RegistrationStatus.CONFIRMED:
+        return
+    await message.answer("Выберите пункт меню", reply_markup=confirmed_menu_keyboard())
