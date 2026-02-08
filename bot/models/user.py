@@ -8,10 +8,10 @@ from bot.db.base import Base
 
 
 class RegistrationStatus(str, enum.Enum):
-    none = "NONE"
-    token_verified = "TOKEN_VERIFIED"
-    subscription_verified = "SUBSCRIPTION_VERIFIED"
-    confirmed = "CONFIRMED"
+    NONE = "NONE"
+    TOKEN_VERIFIED = "TOKEN_VERIFIED"
+    SUBSCRIPTION_VERIFIED = "SUBSCRIPTION_VERIFIED"
+    CONFIRMED = "CONFIRMED"
 
 
 class User(Base):
@@ -21,7 +21,7 @@ class User(Base):
     tg_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False)
     username: Mapped[str | None] = mapped_column(String(255))
     status: Mapped[RegistrationStatus] = mapped_column(
-        Enum(RegistrationStatus), default=RegistrationStatus.none, nullable=False
+        Enum(RegistrationStatus), default=RegistrationStatus.NONE, nullable=False
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow, nullable=False
