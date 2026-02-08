@@ -23,12 +23,23 @@ status_enum = sa.Enum(
     "SUBSCRIPTION_VERIFIED",
     "CONFIRMED",
     name="registrationstatus",
-    create_type=False,   # <-- Запретил SQLAlchemy при создании таблицы создать тот же enum ещё раз
+    create_type=False,
 )
 
 
+def _status_enum_type() -> sa.Enum:
+    return sa.Enum(
+        "NONE",
+        "TOKEN_VERIFIED",
+        "SUBSCRIPTION_VERIFIED",
+        "CONFIRMED",
+        name="registrationstatus",
+    )
+
+
 def upgrade() -> None:
-    status_enum.create(op.get_bind(), checkfirst=True)
+    bind = op.get_bind()
+    _status_enum_type().create(bind, checkfirst=True)
 
     op.create_table(
         "users",
@@ -61,4 +72,5 @@ def downgrade() -> None:
     op.drop_table("pages")
     op.drop_table("posts")
     op.drop_table("users")
-    status_enum.drop(op.get_bind(), checkfirst=True)
+    bind = op.get_bind()
+    _status_enum_type().drop(bind, checkfirst=True)
