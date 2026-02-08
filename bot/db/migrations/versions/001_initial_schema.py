@@ -8,6 +8,7 @@ Create Date: 2024-01-01 00:00:00.000000
 """
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 
 # revision identifiers, used by Alembic.
@@ -17,17 +18,18 @@ branch_labels = None
 depends_on = None
 
 
-status_enum = sa.Enum(
+status_enum = postgresql.ENUM(
     "NONE",
     "TOKEN_VERIFIED",
     "SUBSCRIPTION_VERIFIED",
     "CONFIRMED",
     name="registrationstatus",
-    create_type=False,   # <-- Запретил SQLAlchemy при создании таблицы создать тот же enum ещё раз
+    create_type=False,  # Do not auto-create enum during create_table.
 )
 
 
 def upgrade() -> None:
+    # Initial schema expects a clean database and explicitly creates enum types.
     status_enum.create(op.get_bind(), checkfirst=True)
 
     op.create_table(
