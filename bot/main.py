@@ -15,9 +15,9 @@ async def main() -> None:
     engine, session_maker = create_sessionmaker(settings)
 
     bot = Bot(token=settings.bot_token)
-    bot["settings"] = settings
-    bot["engine"] = engine
-    bot["session_maker"] = session_maker
+    bot.settings = settings
+    bot.engine = engine
+    bot.session_maker = session_maker
 
     dispatcher = setup_dispatcher()
     await dispatcher.start_polling(bot)
