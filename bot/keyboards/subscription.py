@@ -10,7 +10,7 @@ def subscription_check_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="✅ Проверить подписку",
+                    text="✅ Подтвердить подписку",
                     callback_data=CHECK_SUBSCRIPTION_CALLBACK,
                 )
             ]
@@ -18,10 +18,11 @@ def subscription_check_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def subscription_links_keyboard(links: Sequence[str]) -> InlineKeyboardMarkup:
+def subscription_links_keyboard(
+    links: Sequence[tuple[str, str]]
+) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text=f"Канал {index}", url=link)]
-            for index, link in enumerate(links, start=1)
+            [InlineKeyboardButton(text=title, url=url)] for title, url in links
         ]
     )
