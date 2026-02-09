@@ -6,6 +6,7 @@ from aiogram import Bot
 from bot.config import load_settings
 from bot.db.session import create_sessionmaker
 from bot.dispatcher import setup_dispatcher
+from bot.utils.bot_commands import setup_bot_commands
 
 
 async def main() -> None:
@@ -18,6 +19,7 @@ async def main() -> None:
     bot.settings = settings
     bot.engine = engine
     bot.session_maker = session_maker
+    await setup_bot_commands(bot, settings)
 
     dispatcher = setup_dispatcher()
     await dispatcher.start_polling(bot)
