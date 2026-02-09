@@ -32,17 +32,26 @@ class SubscriptionCheckerService:
         self,
         session_maker: async_sessionmaker[AsyncSession],
         user_repository: UserRepository,
-        required_channel_id: int,
+        required_channel_ids: list[int],
         bot: Bot,
     ) -> None:
         self._session_maker = session_maker
         self._user_repository = user_repository
-        self._required_channel_id = required_channel_id
+        self._required_channel_ids = required_channel_ids
         self._bot = bot
 
     async def check_subscription(
         self, tg_id: int, username: str | None
     ) -> SubscriptionCheckResult:
+        if not self._required_channel_ids:
+            logger.error("REQUIRED_CHANNEL_ID(S) is not configured")
+            return SubscriptionCheckResult(
+                rate_limited=False,
+                eligible=False,
+                is_member=None,
+                confirmed_now=False,
+                error_message="Не настроен REQUIRED_CHANNEL_ID(S). Обратитесь к администратору.",
+            )
         now = time.monotonic()
         last_check = _last_check_by_user.get(tg_id, 0.0)
         if now - last_check < _RATE_LIMIT_SECONDS:
@@ -82,37 +91,44 @@ class SubscriptionCheckerService:
                         error_message=None,
                     )
 
-                try:
-                    chat_member = await self._bot.get_chat_member(
-                        self._required_channel_id, tg_id
-                    )
-                except (TelegramForbiddenError, TelegramBadRequest) as exc:
-                    logger.error(
-                        "Failed to check subscription for tg_id=%s: %s",
+                is_member = True
+                for channel_id in self._required_channel_ids:
+                    try:
+                        chat_member = await self._bot.get_chat_member(
+                            channel_id, tg_id
+                        )
+                    except (TelegramForbiddenError, TelegramBadRequest) as exc:
+                        logger.error(
+                            "Failed to check subscription for tg_id=%s channel_id=%s: %s",
+                            tg_id,
+                            channel_id,
+                            exc,
+                        )
+                        return SubscriptionCheckResult(
+                            rate_limited=False,
+                            eligible=True,
+                            is_member=None,
+                            confirmed_now=False,
+                            error_message=(
+                                "Боту нужны права администратора в канале для проверки подписки"
+                            ),
+                        )
+                    status = chat_member.status
+                    channel_member = status in {
+                        ChatMemberStatus.MEMBER,
+                        ChatMemberStatus.ADMINISTRATOR,
+                        ChatMemberStatus.CREATOR,
+                    }
+                    logger.info(
+                        "Subscription status for tg_id=%s channel_id=%s is_member=%s status=%s",
                         tg_id,
-                        exc,
+                        channel_id,
+                        channel_member,
+                        status,
                     )
-                    return SubscriptionCheckResult(
-                        rate_limited=False,
-                        eligible=True,
-                        is_member=None,
-                        confirmed_now=False,
-                        error_message=(
-                            "Боту нужны права администратора в канале для проверки подписки"
-                        ),
-                    )
-                status = chat_member.status
-                is_member = status in {
-                    ChatMemberStatus.MEMBER,
-                    ChatMemberStatus.ADMINISTRATOR,
-                    ChatMemberStatus.CREATOR,
-                }
-                logger.info(
-                    "Subscription status for tg_id=%s is_member=%s status=%s",
-                    tg_id,
-                    is_member,
-                    status,
-                )
+                    if not channel_member:
+                        is_member = False
+                        break
 
                 confirmed_now = False
                 if is_member and user.status != RegistrationStatus.CONFIRMED:

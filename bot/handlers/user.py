@@ -67,18 +67,18 @@ async def check_subscription_handler(callback: CallbackQuery) -> None:
     username = callback.from_user.username if callback.from_user else None
     logger.info("Subscription check callback for tg_id=%s", tg_id)
 
-    if callback.bot.settings.required_channel_id is None:
-        logger.error("REQUIRED_CHANNEL_ID is not configured")
+    if not callback.bot.settings.required_channel_ids:
+        logger.error("REQUIRED_CHANNEL_ID(S) is not configured")
         await callback.answer()
         await callback.message.answer(
-            "Не настроен REQUIRED_CHANNEL_ID. Обратитесь к администратору."
+            "Не настроен REQUIRED_CHANNEL_ID(S). Обратитесь к администратору."
         )
         return
 
     service = SubscriptionCheckerService(
         session_maker=callback.bot.session_maker,
         user_repository=UserRepository(),
-        required_channel_id=callback.bot.settings.required_channel_id,
+        required_channel_ids=callback.bot.settings.required_channel_ids,
         bot=callback.bot,
     )
     result = await service.check_subscription(tg_id=tg_id, username=username)
