@@ -42,3 +42,9 @@ class UserRepository:
         if user.editing_page_key != key:
             user.editing_page_key = key
             session.add(user)
+
+    async def list_confirmed_user_ids(self, session: AsyncSession) -> list[int]:
+        result = await session.execute(
+            select(User.tg_id).where(User.status == RegistrationStatus.CONFIRMED)
+        )
+        return list(result.scalars().all())

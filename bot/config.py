@@ -26,6 +26,14 @@ class Settings(BaseSettings):
         default_factory=list,
         validation_alias="REQUIRED_CHANNELS",
     )
+    broadcast_delay_seconds: float = Field(
+        default=0.07,
+        validation_alias="BROADCAST_DELAY_SECONDS",
+    )
+    broadcast_batch_log_every: int = Field(
+        default=50,
+        validation_alias="BROADCAST_BATCH_LOG_EVERY",
+    )
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
