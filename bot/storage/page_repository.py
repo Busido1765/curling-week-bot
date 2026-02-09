@@ -10,3 +10,8 @@ class PageRepository:
     async def get_by_key(self, session: AsyncSession, key: str) -> Page | None:
         result = await session.execute(select(Page).where(Page.key == key))
         return result.scalar_one_or_none()
+
+    async def create(self, session: AsyncSession, key: str, content: str) -> Page:
+        page = Page(key=key, content=content)
+        session.add(page)
+        return page

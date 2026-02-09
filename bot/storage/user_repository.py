@@ -35,3 +35,10 @@ class UserRepository:
         if user.status != status:
             user.status = status
             session.add(user)
+
+    async def set_editing_page_key(
+        self, session: AsyncSession, user: User, key: str | None
+    ) -> None:
+        if user.editing_page_key != key:
+            user.editing_page_key = key
+            session.add(user)
