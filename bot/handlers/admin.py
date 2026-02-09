@@ -1,8 +1,17 @@
 from aiogram import F, Router
-from bot.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 
+from bot.filters import Command
+
 from bot.keyboards.page_edit import EDIT_PAGE_CALLBACK_PREFIX, page_edit_keyboard
+from bot.keyboards.post_confirm import (
+    POST_CANCEL_CALLBACK_PREFIX,
+    POST_SEND_CALLBACK_PREFIX,
+    post_confirm_keyboard,
+)
+from bot.services.broadcast import BroadcastService
 from bot.services.page_editing import PageEditingService
 from bot.services.pages import (
     DEFAULT_PAGE_MESSAGE,
@@ -12,12 +21,17 @@ from bot.services.pages import (
     PAGE_KEY_SCHEDULE,
     PageService,
 )
-from bot.storage import PageRepository, UserRepository
+from bot.services.post_service import PostService, UnsupportedPostContentError
+from bot.storage import PageRepository, PostRepository, UserRepository
 from bot.utils import serialize_entities
 
 
 router = Router()
 PAGE_KEYS = {PAGE_KEY_FAQ, PAGE_KEY_CONTACTS, PAGE_KEY_SCHEDULE, PAGE_KEY_PHOTO}
+
+
+class PostCreationStates(StatesGroup):
+    waiting_for_content = State()
 
 
 @router.message(Command("admin"))
@@ -94,17 +108,131 @@ async def edit_page_callback(callback: CallbackQuery) -> None:
         )
 
 
-@router.message(Command("cancel"))
-async def cancel_editing(message: Message) -> None:
+@router.message(Command("post"))
+async def start_post_creation(message: Message, state: FSMContext) -> None:
     if not _is_admin(message):
         await message.answer("Недостаточно прав")
         return
+    await state.set_state(PostCreationStates.waiting_for_content)
+    await message.answer(
+        "Пришли текст/фото/файл для анонса. Можно с форматированием как в Telegram."
+    )
+
+
+@router.message(PostCreationStates.waiting_for_content, ~Command())
+async def handle_post_content(message: Message, state: FSMContext) -> None:
+    if not _is_admin(message):
+        return
+    service = PostService(
+        session_maker=message.bot.session_maker,
+        post_repository=PostRepository(),
+    )
+    try:
+        post = await service.create_draft_from_message(message.from_user.id, message)
+    except UnsupportedPostContentError:
+        await message.answer("Пока поддерживаются: текст, фото, документ.")
+        return
+
+    await state.clear()
+    await service.render_post_to_chat(message.bot, message.chat.id, post)
+    await message.answer(
+        "Отправить всем?",
+        reply_markup=post_confirm_keyboard(post.id),
+    )
+
+
+@router.message(Command("cancel"))
+async def cancel_editing(message: Message, state: FSMContext) -> None:
+    if not _is_admin(message):
+        await message.answer("Недостаточно прав")
+        return
+    await state.clear()
     service = PageEditingService(
         session_maker=message.bot.session_maker,
         user_repository=UserRepository(),
     )
     await service.cancel_editing(message.from_user.id)
     await message.answer("Отменено")
+
+
+@router.callback_query(F.data.startswith(POST_CANCEL_CALLBACK_PREFIX))
+async def cancel_post_callback(callback: CallbackQuery) -> None:
+    if not _is_admin_callback(callback):
+        await callback.answer("Недостаточно прав")
+        return
+    data = callback.data or ""
+    post_id_raw = data[len(POST_CANCEL_CALLBACK_PREFIX) :]
+    if not post_id_raw.isdigit():
+        await callback.answer("Некорректный пост")
+        return
+    post_id = int(post_id_raw)
+    post_repository = PostRepository()
+    async with callback.bot.session_maker() as session:
+        async with session.begin():
+            post = await post_repository.get(session, post_id)
+            if post is None:
+                await callback.answer("Пост не найден")
+                return
+            if post.status != "draft":
+                await callback.answer("Уже отправлено/отменено")
+                return
+            await post_repository.mark_canceled(session, post_id)
+    await callback.answer()
+    if callback.message:
+        await callback.message.answer("Отменено")
+
+
+@router.callback_query(F.data.startswith(POST_SEND_CALLBACK_PREFIX))
+async def send_post_callback(callback: CallbackQuery) -> None:
+    if not _is_admin_callback(callback):
+        await callback.answer("Недостаточно прав")
+        return
+    data = callback.data or ""
+    post_id_raw = data[len(POST_SEND_CALLBACK_PREFIX) :]
+    if not post_id_raw.isdigit():
+        await callback.answer("Некорректный пост")
+        return
+    post_id = int(post_id_raw)
+
+    async with callback.bot.session_maker() as session:
+        post_repository = PostRepository()
+        post = await post_repository.get(session, post_id)
+        if post is None:
+            await callback.answer("Пост не найден")
+            return
+        if post.status != "draft":
+            await callback.answer("Уже отправлено/отменено")
+            return
+
+    await callback.answer()
+    if callback.message:
+        await callback.message.answer("Начинаю рассылку…")
+
+    settings = callback.bot.settings
+    post_service = PostService(
+        session_maker=callback.bot.session_maker,
+        post_repository=PostRepository(),
+    )
+    broadcast_service = BroadcastService(
+        session_maker=callback.bot.session_maker,
+        post_repository=PostRepository(),
+        user_repository=UserRepository(),
+        post_service=post_service,
+        send_delay_seconds=settings.broadcast_delay_seconds,
+        batch_log_every=settings.broadcast_batch_log_every,
+    )
+    try:
+        success_count, fail_count = await broadcast_service.broadcast_post(
+            callback.bot, post_id
+        )
+    except ValueError:
+        if callback.message:
+            await callback.message.answer("Уже отправлено/отменено")
+        return
+    if callback.message:
+        await callback.message.answer(
+            f"Готово. Успешно: {success_count}, Ошибок: {fail_count}"
+        )
 
 
 @router.message((F.text & ~F.text.startswith("/")) | F.photo | F.document)
