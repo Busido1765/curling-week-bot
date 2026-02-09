@@ -2,10 +2,19 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, List
 
-from pydantic import Field, field_validator
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
+
+
+class RequiredChannel(BaseModel):
+    id: int
+    title: str = ""
+    url: str = ""
 
 
 class Settings(BaseSettings):
@@ -13,13 +22,9 @@ class Settings(BaseSettings):
     database_url: str
     jwt_secret: str
     admin_ids: List[int]
-    required_channel_ids: List[int] = Field(
+    required_channels: List[RequiredChannel] = Field(
         default_factory=list,
-        validation_alias="REQUIRED_CHANNEL_IDS",
-    )
-    required_channel_links: List[str] = Field(
-        default_factory=list,
-        validation_alias="REQUIRED_CHANNEL_LINKS",
+        validation_alias="REQUIRED_CHANNELS",
     )
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -56,63 +61,60 @@ class Settings(BaseSettings):
         s = str(value)
         return [int(item.strip()) for item in s.split(",") if item.strip()]
 
-    @field_validator("required_channel_ids", mode="before")
+    @field_validator("required_channels", mode="before")
     @classmethod
-    def _parse_required_channel_ids(cls, value: Any) -> List[int]:
-        if value is None or value == "":
+    def _parse_required_channels(cls, value: Any) -> List[RequiredChannel]:
+        if value is None:
+            return []
+        if value == "":
+            logger.warning("REQUIRED_CHANNELS is empty")
             return []
 
-        if isinstance(value, int):
-            return [value]
-
+        parsed: Any
         if isinstance(value, list):
-            return [int(item) for item in value]
-
-        if isinstance(value, str):
+            parsed = value
+        elif isinstance(value, str):
             raw = value.strip()
-            if raw.startswith("[") and raw.endswith("]"):
-                try:
-                    parsed = json.loads(raw)
-                except json.JSONDecodeError:
-                    parsed = None
-                else:
-                    if isinstance(parsed, list):
-                        return [int(item) for item in parsed]
-            if "," in raw:
-                return [int(item.strip()) for item in raw.split(",") if item.strip()]
-            if raw:
-                return [int(raw)]
-
-        return [int(item) for item in str(value).split(",") if str(item).strip()]
-
-    @field_validator("required_channel_links", mode="before")
-    @classmethod
-    def _parse_required_channel_links(cls, value: Any) -> List[str]:
-        if value is None or value == "":
+            if not raw:
+                return []
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                logger.warning("Invalid REQUIRED_CHANNELS JSON")
+                return []
+        else:
+            logger.warning("Unexpected REQUIRED_CHANNELS format")
             return []
 
-        if isinstance(value, list):
-            return [str(item).strip() for item in value if str(item).strip()]
+        if not isinstance(parsed, list):
+            logger.warning("REQUIRED_CHANNELS is not a list")
+            return []
 
-        if isinstance(value, str):
-            raw = value.strip()
-            if raw.startswith("[") and raw.endswith("]"):
-                try:
-                    parsed = json.loads(raw)
-                except json.JSONDecodeError:
-                    parsed = None
-                else:
-                    if isinstance(parsed, list):
-                        return [
-                            str(item).strip() for item in parsed if str(item).strip()
-                        ]
-            if "," in raw:
-                return [item.strip() for item in raw.split(",") if item.strip()]
-            if raw:
-                return [raw]
+        channels: List[RequiredChannel] = []
+        for item in parsed:
+            if isinstance(item, RequiredChannel):
+                channels.append(item)
+                continue
+            if not isinstance(item, dict):
+                logger.warning("Invalid REQUIRED_CHANNELS item skipped: %s", item)
+                continue
+            raw_id = item.get("id")
+            try:
+                channel_id = int(raw_id)
+            except (TypeError, ValueError):
+                logger.warning("Invalid REQUIRED_CHANNELS id skipped: %s", raw_id)
+                continue
+            title = item.get("title")
+            url = item.get("url")
+            channels.append(
+                RequiredChannel(
+                    id=channel_id,
+                    title=str(title).strip() if title is not None else "",
+                    url=str(url).strip() if url is not None else "",
+                )
+            )
 
-        return [str(item).strip() for item in str(value).split(",") if str(item).strip()]
-
+        return channels
 
 def load_settings() -> Settings:
     return Settings()

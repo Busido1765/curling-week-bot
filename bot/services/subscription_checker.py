@@ -9,7 +9,9 @@ from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.enums import ChatMemberStatus
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from bot.config import RequiredChannel
 from bot.models import RegistrationStatus
+from bot.services.subscription_channels import get_required_channel_ids_for_check
 from bot.storage import UserRepository
 
 logger = logging.getLogger(__name__)
@@ -32,25 +34,27 @@ class SubscriptionCheckerService:
         self,
         session_maker: async_sessionmaker[AsyncSession],
         user_repository: UserRepository,
-        required_channel_ids: list[int],
+        required_channels: list[RequiredChannel],
         bot: Bot,
     ) -> None:
         self._session_maker = session_maker
         self._user_repository = user_repository
-        self._required_channel_ids = required_channel_ids
+        self._required_channel_ids = get_required_channel_ids_for_check(
+            required_channels
+        )
         self._bot = bot
 
     async def check_subscription(
         self, tg_id: int, username: str | None
     ) -> SubscriptionCheckResult:
         if not self._required_channel_ids:
-            logger.error("REQUIRED_CHANNEL_ID(S) is not configured")
+            logger.error("required_channels is empty after normalization")
             return SubscriptionCheckResult(
                 rate_limited=False,
                 eligible=False,
                 is_member=None,
                 confirmed_now=False,
-                error_message="Не настроен REQUIRED_CHANNEL_ID(S). Обратитесь к администратору.",
+                error_message="Регистрация временно недоступна. Попробуй позже.",
             )
         now = time.monotonic()
         last_check = _last_check_by_user.get(tg_id, 0.0)
@@ -110,7 +114,7 @@ class SubscriptionCheckerService:
                             is_member=None,
                             confirmed_now=False,
                             error_message=(
-                                "Боту нужны права администратора в канале для проверки подписки"
+                                "Не могу проверить подписку. Боту нужны права администратора в канале."
                             ),
                         )
                     status = chat_member.status

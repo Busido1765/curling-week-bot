@@ -198,7 +198,7 @@ Docker не является обязательным для разработк�
 - `DATABASE_URL`
 - `JWT_SECRET`
 - `ADMIN_IDS`
-- `REQUIRED_CHANNEL_ID`
+- `REQUIRED_CHANNELS`
 
 Все переменные документируются в `.env.example`.
 
