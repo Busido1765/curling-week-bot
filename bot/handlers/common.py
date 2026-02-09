@@ -51,14 +51,30 @@ async def _send_page(message: Message, key: str) -> None:
         session_maker=message.bot.session_maker,
         page_repository=PageRepository(),
     )
-    result = await service.get_page(key)
-    content = result.content or DEFAULT_PAGE_MESSAGE
+    render = await service.render_page(key)
     reply_markup = None
     if _is_admin(message):
         reply_markup = page_edit_keyboard(key)
     else:
         reply_markup = await _get_confirmed_menu(message)
-    await message.answer(content, reply_markup=reply_markup)
+    if render.content_type == "photo" and render.file_id:
+        await message.answer_photo(
+            render.file_id,
+            caption=render.caption,
+            caption_entities=render.caption_entities,
+            reply_markup=reply_markup,
+        )
+        return
+    if render.content_type == "document" and render.file_id:
+        await message.answer_document(
+            render.file_id,
+            caption=render.caption,
+            caption_entities=render.caption_entities,
+            reply_markup=reply_markup,
+        )
+        return
+    content = render.text or DEFAULT_PAGE_MESSAGE
+    await message.answer(content, reply_markup=reply_markup, entities=render.entities)
 
 
 @router.message(Command("faq"))

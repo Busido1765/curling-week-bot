@@ -13,6 +13,7 @@ from bot.services.pages import (
     PageService,
 )
 from bot.storage import PageRepository, UserRepository
+from bot.utils import serialize_entities
 
 
 router = Router()
@@ -45,9 +46,26 @@ async def _send_page_with_edit_button(message: Message, key: str) -> None:
         session_maker=message.bot.session_maker,
         page_repository=PageRepository(),
     )
-    result = await service.get_page(key)
-    content = result.content or DEFAULT_PAGE_MESSAGE
-    await message.answer(content, reply_markup=page_edit_keyboard(key))
+    render = await service.render_page(key)
+    reply_markup = page_edit_keyboard(key)
+    if render.content_type == "photo" and render.file_id:
+        await message.answer_photo(
+            render.file_id,
+            caption=render.caption,
+            caption_entities=render.caption_entities,
+            reply_markup=reply_markup,
+        )
+        return
+    if render.content_type == "document" and render.file_id:
+        await message.answer_document(
+            render.file_id,
+            caption=render.caption,
+            caption_entities=render.caption_entities,
+            reply_markup=reply_markup,
+        )
+        return
+    content = render.text or DEFAULT_PAGE_MESSAGE
+    await message.answer(content, reply_markup=reply_markup, entities=render.entities)
 
 
 @router.callback_query(F.data.startswith(EDIT_PAGE_CALLBACK_PREFIX))
@@ -72,7 +90,7 @@ async def edit_page_callback(callback: CallbackQuery) -> None:
     await callback.answer()
     if callback.message:
         await callback.message.answer(
-            f"Пришли новый текст для {page_key}. Для отмены: /cancel"
+            f"Пришли новый текст, фото или документ для {page_key}. Для отмены: /cancel"
         )
 
 
@@ -89,7 +107,7 @@ async def cancel_editing(message: Message) -> None:
     await message.answer("Отменено")
 
 
-@router.message(F.text & ~F.text.startswith("/"))
+@router.message((F.text & ~F.text.startswith("/")) | F.photo | F.document)
 async def handle_page_editing(message: Message) -> None:
     if not _is_admin(message):
         return
@@ -104,7 +122,46 @@ async def handle_page_editing(message: Message) -> None:
         session_maker=message.bot.session_maker,
         page_repository=PageRepository(),
     )
-    await page_service.update_page(editing_key, message.text or "")
+    if message.photo:
+        file_id = message.photo[-1].file_id
+        await page_service.update_page_photo(
+            editing_key,
+            file_id=file_id,
+            caption=message.caption,
+            caption_entities=serialize_entities(message.caption_entities),
+        )
+    elif message.document:
+        await page_service.update_page_document(
+            editing_key,
+            file_id=message.document.file_id,
+            caption=message.caption,
+            caption_entities=serialize_entities(message.caption_entities),
+        )
+    elif message.text:
+        await page_service.update_page_text(
+            editing_key,
+            text=message.text,
+            entities=serialize_entities(message.entities),
+        )
+    else:
+        await message.answer("Пока поддерживаются: текст, фото, документ.")
+        return
     await service.cancel_editing(message.from_user.id)
     await message.answer("Сохранено ✅")
     await _send_page_with_edit_button(message, editing_key)
+
+
+@router.message()
+async def handle_page_editing_unsupported(message: Message) -> None:
+    if not _is_admin(message):
+        return
+    service = PageEditingService(
+        session_maker=message.bot.session_maker,
+        user_repository=UserRepository(),
+    )
+    editing_key = await service.get_editing_key(message.from_user.id)
+    if editing_key is None:
+        return
+    if message.text or message.photo or message.document:
+        return
+    await message.answer("Пока поддерживаются: текст, фото, документ.")
