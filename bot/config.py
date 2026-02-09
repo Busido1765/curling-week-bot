@@ -1,9 +1,10 @@
 # bot/config.py
 from __future__ import annotations
 
-from typing import Any, List  # CHANGED: добавили Any, чтобы валидатор принимал int/str/list без падений
+import json
+from typing import Any, List
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,7 +13,10 @@ class Settings(BaseSettings):
     database_url: str
     jwt_secret: str
     admin_ids: List[int]
-    required_channel_id: int | None = None
+    required_channel_ids: List[int] = Field(
+        default_factory=list,
+        validation_alias="REQUIRED_CHANNEL_IDS",
+    )
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -47,6 +51,35 @@ class Settings(BaseSettings):
         # CHANGED: строка или что-то приводимое к строке
         s = str(value)
         return [int(item.strip()) for item in s.split(",") if item.strip()]
+
+    @field_validator("required_channel_ids", mode="before")
+    @classmethod
+    def _parse_required_channel_ids(cls, value: Any) -> List[int]:
+        if value is None or value == "":
+            return []
+
+        if isinstance(value, int):
+            return [value]
+
+        if isinstance(value, list):
+            return [int(item) for item in value]
+
+        if isinstance(value, str):
+            raw = value.strip()
+            if raw.startswith("[") and raw.endswith("]"):
+                try:
+                    parsed = json.loads(raw)
+                except json.JSONDecodeError:
+                    parsed = None
+                else:
+                    if isinstance(parsed, list):
+                        return [int(item) for item in parsed]
+            if "," in raw:
+                return [int(item.strip()) for item in raw.split(",") if item.strip()]
+            if raw:
+                return [int(raw)]
+
+        return [int(item) for item in str(value).split(",") if str(item).strip()]
 
 
 def load_settings() -> Settings:
