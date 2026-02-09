@@ -14,9 +14,11 @@ from bot.keyboards import (
 from bot.keyboards.subscription import (
     CHECK_SUBSCRIPTION_CALLBACK,
     subscription_check_keyboard,
+    subscription_links_keyboard,
 )
 from bot.models import RegistrationStatus
 from bot.services.registration import RegistrationService
+from bot.services.subscription_channels import build_subscription_channels_presentation
 from bot.services.subscription_checker import SubscriptionCheckerService
 from bot.services.token_verifier import get_token_verifier
 from bot.services.user_status import UserStatusService
@@ -52,8 +54,19 @@ async def start_handler(message: Message) -> None:
         return
 
     if result.token_valid:
+        channels_presentation = build_subscription_channels_presentation(
+            required_channel_ids=message.bot.settings.required_channel_ids,
+            required_channel_links=message.bot.settings.required_channel_links,
+        )
+        reply_markup = None
+        if channels_presentation.has_links:
+            reply_markup = subscription_links_keyboard(channels_presentation.links)
         await message.answer(
-            "Токен принят. Следующий шаг — проверка подписки на канал",
+            channels_presentation.message_text,
+            reply_markup=reply_markup,
+        )
+        await message.answer(
+            "После подписки вернись сюда и нажми кнопку:",
             reply_markup=subscription_check_keyboard(),
         )
         return
