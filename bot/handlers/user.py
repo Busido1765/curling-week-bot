@@ -25,6 +25,7 @@ from bot.services.subscription_channels import (
 from bot.services.subscription_checker import SubscriptionCheckerService
 from bot.services.token_verifier import get_token_verifier
 from bot.services.user_status import UserStatusService
+from bot.services.page_editing import PageEditingService
 from bot.storage import UserRepository
 
 router = Router()
@@ -133,6 +134,13 @@ async def check_subscription_handler(callback: CallbackQuery) -> None:
 )
 async def confirmed_user_fallback(message: Message) -> None:
     if message.from_user is None:
+        return
+    editing_service = PageEditingService(
+        session_maker=message.bot.session_maker,
+        user_repository=UserRepository(),
+    )
+    editing_key = await editing_service.get_editing_key(message.from_user.id)
+    if editing_key is not None:
         return
     service = UserStatusService(
         session_maker=message.bot.session_maker,

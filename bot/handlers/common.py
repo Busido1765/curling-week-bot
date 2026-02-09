@@ -9,7 +9,9 @@ from bot.keyboards import (
     SCHEDULE_BUTTON,
     confirmed_menu_keyboard,
 )
+from bot.keyboards.page_edit import page_edit_keyboard
 from bot.models import RegistrationStatus
+from bot.services.page_editing import PageEditingService
 from bot.services.pages import (
     DEFAULT_PAGE_MESSAGE,
     PAGE_KEY_CONTACTS,
@@ -38,6 +40,12 @@ async def _get_confirmed_menu(message: Message) -> ReplyKeyboardMarkup | None:
     return None
 
 
+def _is_admin(message: Message) -> bool:
+    if message.from_user is None:
+        return False
+    return message.from_user.id in message.bot.settings.admin_ids
+
+
 async def _send_page(message: Message, key: str) -> None:
     service = PageService(
         session_maker=message.bot.session_maker,
@@ -45,7 +53,11 @@ async def _send_page(message: Message, key: str) -> None:
     )
     result = await service.get_page(key)
     content = result.content or DEFAULT_PAGE_MESSAGE
-    reply_markup = await _get_confirmed_menu(message)
+    reply_markup = None
+    if _is_admin(message):
+        reply_markup = page_edit_keyboard(key)
+    else:
+        reply_markup = await _get_confirmed_menu(message)
     await message.answer(content, reply_markup=reply_markup)
 
 

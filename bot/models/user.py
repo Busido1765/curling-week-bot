@@ -23,6 +23,7 @@ class User(Base):
     status: Mapped[RegistrationStatus] = mapped_column(
         Enum(RegistrationStatus), default=RegistrationStatus.NONE, nullable=False
     )
+    editing_page_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow, nullable=False
     )
