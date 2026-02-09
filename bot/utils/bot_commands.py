@@ -29,6 +29,7 @@ async def setup_bot_commands(bot: Bot, settings: Settings) -> None:
     default_commands = [
         BotCommand(command="start", description="Начать"),
     ]
+    logger.debug("Setting default bot commands: %s", default_commands)
     try:
         await bot.set_my_commands(default_commands, scope=BotCommandScopeDefault())
     except Exception:
@@ -39,6 +40,11 @@ async def setup_bot_commands(bot: Bot, settings: Settings) -> None:
         BotCommand(command="post", description="Новый анонс"),
     ]
     for admin_id in _unique_admin_ids(settings.admin_ids):
+        logger.debug(
+            "Setting admin bot commands for chat_id=%s: %s",
+            admin_id,
+            admin_commands,
+        )
         try:
             await bot.set_my_commands(
                 admin_commands,
