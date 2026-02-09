@@ -17,6 +17,10 @@ class Settings(BaseSettings):
         default_factory=list,
         validation_alias="REQUIRED_CHANNEL_IDS",
     )
+    required_channel_links: List[str] = Field(
+        default_factory=list,
+        validation_alias="REQUIRED_CHANNEL_LINKS",
+    )
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -80,6 +84,34 @@ class Settings(BaseSettings):
                 return [int(raw)]
 
         return [int(item) for item in str(value).split(",") if str(item).strip()]
+
+    @field_validator("required_channel_links", mode="before")
+    @classmethod
+    def _parse_required_channel_links(cls, value: Any) -> List[str]:
+        if value is None or value == "":
+            return []
+
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+
+        if isinstance(value, str):
+            raw = value.strip()
+            if raw.startswith("[") and raw.endswith("]"):
+                try:
+                    parsed = json.loads(raw)
+                except json.JSONDecodeError:
+                    parsed = None
+                else:
+                    if isinstance(parsed, list):
+                        return [
+                            str(item).strip() for item in parsed if str(item).strip()
+                        ]
+            if "," in raw:
+                return [item.strip() for item in raw.split(",") if item.strip()]
+            if raw:
+                return [raw]
+
+        return [str(item).strip() for item in str(value).split(",") if str(item).strip()]
 
 
 def load_settings() -> Settings:
