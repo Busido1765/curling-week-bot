@@ -1,7 +1,5 @@
-import re
-
 from aiogram import F, Router
-from aiogram.filters import Command
+from bot.filters import Command
 from aiogram.types import CallbackQuery, Message
 
 from bot.keyboards.page_edit import EDIT_PAGE_CALLBACK_PREFIX, page_edit_keyboard
@@ -153,7 +151,7 @@ async def handle_page_editing(message: Message) -> None:
     await _send_page_with_edit_button(message, editing_key)
 
 
-@router.message(~Command(re.compile(r".+")))
+@router.message(~Command())
 async def handle_page_editing_unsupported(message: Message) -> None:
     if not _is_admin(message):
         return
