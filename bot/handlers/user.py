@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 @router.message(CommandStart())
 async def start_handler(message: Message) -> None:
+    logger.info("DEBUG: start_handler triggered")
     token = None
     if message.text:
         parts = message.text.split(maxsplit=1)
