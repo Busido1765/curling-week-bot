@@ -72,24 +72,41 @@ async def _send_page_with_edit_button(message: Message, key: str) -> None:
     )
     render = await service.render_page(key)
     reply_markup = page_edit_keyboard(key)
-    if render.content_type == "photo" and render.file_id:
+    if render.main_content_type == "photo" and render.main_photo_file_id:
         await message.answer_photo(
-            render.file_id,
-            caption=render.caption,
-            caption_entities=render.caption_entities,
+            render.main_photo_file_id,
+            caption=render.main_photo_caption,
+            caption_entities=render.main_photo_caption_entities,
             reply_markup=reply_markup,
         )
+        if render.extra_document_file_id:
+            await message.answer_document(
+                render.extra_document_file_id,
+                caption=render.extra_document_caption,
+                caption_entities=render.extra_document_caption_entities,
+            )
         return
-    if render.content_type == "document" and render.file_id:
+
+    if render.main_text:
+        await message.answer(render.main_text, reply_markup=reply_markup, entities=render.main_entities)
+        if render.extra_document_file_id:
+            await message.answer_document(
+                render.extra_document_file_id,
+                caption=render.extra_document_caption,
+                caption_entities=render.extra_document_caption_entities,
+            )
+        return
+
+    if render.extra_document_file_id:
         await message.answer_document(
-            render.file_id,
-            caption=render.caption,
-            caption_entities=render.caption_entities,
+            render.extra_document_file_id,
+            caption=render.extra_document_caption,
+            caption_entities=render.extra_document_caption_entities,
             reply_markup=reply_markup,
         )
         return
-    content = render.text or DEFAULT_PAGE_MESSAGE
-    await message.answer(content, reply_markup=reply_markup, entities=render.entities)
+
+    await message.answer(DEFAULT_PAGE_MESSAGE, reply_markup=reply_markup)
 
 
 async def _start_page_editing(
@@ -125,8 +142,41 @@ async def _start_page_editing(
         username=actor_username,
         key=page_key,
     )
+    page_service = PageService(
+        session_maker=message.bot.session_maker,
+        page_repository=PageRepository(),
+    )
+    render = await page_service.render_page(page_key)
+    draft = {"key": page_key}
+    if render.main_content_type == "photo" and render.main_photo_file_id:
+        draft.update(
+            {
+                "main_content_type": "photo",
+                "main_photo_file_id": render.main_photo_file_id,
+                "main_photo_caption": render.main_photo_caption or "",
+                "main_photo_caption_entities": render.main_photo_caption_entities,
+            }
+        )
+    else:
+        draft.update(
+            {
+                "main_content_type": "text",
+                "main_text": render.main_text or "",
+                "main_entities": render.main_entities,
+            }
+        )
+
+    if render.extra_document_file_id:
+        draft.update(
+            {
+                "extra_document_file_id": render.extra_document_file_id,
+                "extra_document_caption": render.extra_document_caption or "",
+                "extra_document_caption_entities": render.extra_document_caption_entities,
+            }
+        )
+
     await state.set_state(PageEditingStates.waiting_for_content)
-    await state.update_data(page_draft={"key": page_key})
+    await state.update_data(page_draft=draft)
     await message.answer(
         f"Редактирование страницы {page_key}. Пришли текст, фото или документ.\n"
         "После каждого обновления я автоматически покажу превью.\n"
@@ -402,32 +452,36 @@ async def send_post_callback(callback: CallbackQuery, state: FSMContext) -> None
 
 async def _send_page_draft_preview(message: Message, page_key: str, draft: dict) -> None:
     reply_markup = page_edit_keyboard(page_key)
-    content_type = draft.get("content_type", "text")
 
-    if content_type == "photo" and draft.get("file_id"):
+    if draft.get("main_content_type") == "photo" and draft.get("main_photo_file_id"):
         await message.answer_photo(
-            draft["file_id"],
-            caption=draft.get("caption") or "",
-            caption_entities=draft.get("caption_entities"),
+            draft["main_photo_file_id"],
+            caption=draft.get("main_photo_caption") or "",
+            caption_entities=draft.get("main_photo_caption_entities"),
             reply_markup=reply_markup,
         )
-        return
+    else:
+        text = (draft.get("main_text") or "").strip()
+        if text:
+            await message.answer(
+                text,
+                entities=draft.get("main_entities"),
+                reply_markup=reply_markup,
+            )
+        elif draft.get("extra_document_file_id"):
+            await message.answer(
+                "Основной контент пока не задан.",
+                reply_markup=reply_markup,
+            )
+        else:
+            await message.answer(DEFAULT_PAGE_MESSAGE, reply_markup=reply_markup)
 
-    if content_type == "document" and draft.get("file_id"):
+    if draft.get("extra_document_file_id"):
         await message.answer_document(
-            draft["file_id"],
-            caption=draft.get("caption") or "",
-            caption_entities=draft.get("caption_entities"),
-            reply_markup=reply_markup,
+            draft["extra_document_file_id"],
+            caption=draft.get("extra_document_caption") or "",
+            caption_entities=draft.get("extra_document_caption_entities"),
         )
-        return
-
-    text = (draft.get("text") or "").strip()
-    await message.answer(
-        text or DEFAULT_PAGE_MESSAGE,
-        entities=draft.get("entities"),
-        reply_markup=reply_markup,
-    )
 
 
 @router.message(
@@ -459,9 +513,9 @@ async def handle_page_editing_text(message: Message, state: FSMContext) -> None:
     draft.update(
         {
             "key": editing_key,
-            "content_type": "text",
-            "text": message.text,
-            "entities": message.entities,
+            "main_content_type": "text",
+            "main_text": message.text,
+            "main_entities": message.entities,
         }
     )
 
@@ -493,19 +547,18 @@ async def handle_page_editing_media(message: Message, state: FSMContext) -> None
     if message.photo:
         draft.update(
             {
-                "content_type": "photo",
-                "file_id": message.photo[-1].file_id,
-                "caption": message.caption or "",
-                "caption_entities": message.caption_entities,
+                "main_content_type": "photo",
+                "main_photo_file_id": message.photo[-1].file_id,
+                "main_photo_caption": message.caption or "",
+                "main_photo_caption_entities": message.caption_entities,
             }
         )
     elif message.document:
         draft.update(
             {
-                "content_type": "document",
-                "file_id": message.document.file_id,
-                "caption": message.caption or "",
-                "caption_entities": message.caption_entities,
+                "extra_document_file_id": message.document.file_id,
+                "extra_document_caption": message.caption or "",
+                "extra_document_caption_entities": message.caption_entities,
             }
         )
 
@@ -546,26 +599,26 @@ async def save_page_draft_callback(callback: CallbackQuery, state: FSMContext) -
         session_maker=callback.bot.session_maker,
         page_repository=PageRepository(),
     )
-    content_type = draft.get("content_type")
-    if content_type == "photo" and draft.get("file_id"):
+    if draft.get("main_content_type") == "photo" and draft.get("main_photo_file_id"):
         await page_service.update_page_photo(
             editing_key,
-            file_id=draft["file_id"],
-            caption=draft.get("caption"),
-            caption_entities=serialize_entities(draft.get("caption_entities")),
-        )
-    elif content_type == "document" and draft.get("file_id"):
-        await page_service.update_page_document(
-            editing_key,
-            file_id=draft["file_id"],
-            caption=draft.get("caption"),
-            caption_entities=serialize_entities(draft.get("caption_entities")),
+            file_id=draft["main_photo_file_id"],
+            caption=draft.get("main_photo_caption"),
+            caption_entities=serialize_entities(draft.get("main_photo_caption_entities")),
         )
     else:
         await page_service.update_page_text(
             editing_key,
-            text=draft.get("text") or "",
-            entities=serialize_entities(draft.get("entities")),
+            text=draft.get("main_text") or "",
+            entities=serialize_entities(draft.get("main_entities")),
+        )
+
+    if draft.get("extra_document_file_id"):
+        await page_service.update_page_document(
+            editing_key,
+            file_id=draft["extra_document_file_id"],
+            caption=draft.get("extra_document_caption"),
+            caption_entities=serialize_entities(draft.get("extra_document_caption_entities")),
         )
 
     await service.cancel_editing(callback.from_user.id)

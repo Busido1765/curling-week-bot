@@ -19,6 +19,9 @@ class Page(Base):
     file_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     caption: Mapped[str | None] = mapped_column(Text, nullable=True)
     caption_entities: Mapped[list[dict] | None] = mapped_column(JSONB, nullable=True)
+    extra_document_file_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    extra_document_caption: Mapped[str | None] = mapped_column(Text, nullable=True)
+    extra_document_caption_entities: Mapped[list[dict] | None] = mapped_column(JSONB, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
