@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -63,12 +64,19 @@ class PostService:
         }
 
     def _load_payload(self, post: Post) -> dict[str, Any]:
-        payload = post.entities if isinstance(post.entities, dict) else None
+        payload = deepcopy(post.entities) if isinstance(post.entities, dict) else None
         if not payload:
             payload = self._empty_payload()
         for key in ("main_text", "main_entities", "main_media", "extra_document"):
             payload.setdefault(key, None)
         return payload
+
+    def _payload_flags(self, payload: dict[str, Any]) -> tuple[bool, bool, bool]:
+        return (
+            bool(payload.get("main_text")),
+            bool(payload.get("main_media")),
+            bool(payload.get("extra_document")),
+        )
 
     async def _get_or_create_draft(self, admin_id: int) -> Post:
         async with self._session_maker() as session:
@@ -114,6 +122,8 @@ class PostService:
         if message.media_group_id:
             raise UnsupportedPostContentError("album")
 
+        notice: str | None = None
+        saved_post: Post | None = None
         async with self._session_maker() as session:
             async with session.begin():
                 draft = await self._post_repository.get_active_draft_by_admin(session, admin_id)
@@ -131,12 +141,11 @@ class PostService:
                     await session.flush()
 
                 payload = self._load_payload(draft)
-                notice = None
 
                 if message.text:
                     payload["main_text"] = message.text
                     payload["main_entities"] = serialize_entities(message.entities)
-                    logger.info("Post draft updated with text admin_id=%s", admin_id)
+                    update_type = "text"
                 elif message.photo or message.video or message.animation:
                     media_type = "photo"
                     file_id = ""
@@ -155,7 +164,7 @@ class PostService:
                         "caption_entities": serialize_entities(message.caption_entities),
                     }
                     notice = "Медиа обновлено." if payload.get("main_media") else None
-                    logger.info("Post draft updated with media type=%s admin_id=%s", media_type, admin_id)
+                    update_type = f"media:{media_type}"
                 elif message.document:
                     payload["extra_document"] = {
                         "file_id": message.document.file_id,
@@ -164,7 +173,7 @@ class PostService:
                         "caption_entities": serialize_entities(message.caption_entities),
                     }
                     notice = "Файл заменён. Он будет отправлен отдельным сообщением."
-                    logger.info("Post draft updated with document admin_id=%s", admin_id)
+                    update_type = "document"
                 else:
                     raise UnsupportedPostContentError("unsupported")
 
@@ -172,11 +181,37 @@ class PostService:
                 draft.content_type = "draft_v2"
                 session.add(draft)
                 await session.flush()
-                return DraftApplyResult(post=draft, notice=notice)
+                has_text, has_media, has_doc = self._payload_flags(payload)
+                logger.info(
+                    "Post draft updated admin_id=%s type=%s has_text=%s has_media=%s has_doc=%s",
+                    admin_id,
+                    update_type,
+                    has_text,
+                    has_media,
+                    has_doc,
+                )
+                saved_post = draft
+
+        read_back = await self.get_active_draft(admin_id)
+        if read_back:
+            read_payload = self._load_payload(read_back)
+            has_text, has_media, has_doc = self._payload_flags(read_payload)
+            logger.info(
+                "Post draft write-read check admin_id=%s has_text=%s has_media=%s has_doc=%s",
+                admin_id,
+                has_text,
+                has_media,
+                has_doc,
+            )
+        else:
+            logger.warning("Post draft write-read check failed admin_id=%s draft_not_found", admin_id)
+        return DraftApplyResult(post=read_back or saved_post, notice=notice)
 
     async def get_active_draft(self, admin_id: int) -> Post | None:
         async with self._session_maker() as session:
-            return await self._post_repository.get_active_draft_by_admin(session, admin_id)
+            draft = await self._post_repository.get_active_draft_by_admin(session, admin_id)
+            logger.info("Post draft fetched admin_id=%s found=%s", admin_id, bool(draft))
+            return draft
 
     def _resolve_main(self, post: Post) -> dict[str, Any]:
         payload = self._load_payload(post)
