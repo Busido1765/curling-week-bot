@@ -1,3 +1,5 @@
+import logging
+
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -28,6 +30,7 @@ from bot.utils import serialize_entities
 
 router = Router()
 PAGE_KEYS = {PAGE_KEY_FAQ, PAGE_KEY_CONTACTS, PAGE_KEY_SCHEDULE, PAGE_KEY_PHOTO}
+logger = logging.getLogger(__name__)
 
 
 class PostCreationStates(StatesGroup):
@@ -119,10 +122,14 @@ async def start_post_creation(message: Message, state: FSMContext) -> None:
     )
 
 
-@router.message(PostCreationStates.waiting_for_content, ~Command())
-async def handle_post_content(message: Message, state: FSMContext) -> None:
+async def _handle_post_content(message: Message, state: FSMContext, content_type: str) -> None:
     if not _is_admin(message):
         return
+    logger.info(
+        "Post content received type=%s admin_id=%s",
+        content_type,
+        message.from_user.id if message.from_user else None,
+    )
     service = PostService(
         session_maker=message.bot.session_maker,
         post_repository=PostRepository(),
@@ -139,6 +146,21 @@ async def handle_post_content(message: Message, state: FSMContext) -> None:
         "Отправить всем?",
         reply_markup=post_confirm_keyboard(post.id),
     )
+
+
+@router.message(PostCreationStates.waiting_for_content, F.text, ~Command())
+async def handle_post_text(message: Message, state: FSMContext) -> None:
+    await _handle_post_content(message, state, "text")
+
+
+@router.message(PostCreationStates.waiting_for_content, F.photo)
+async def handle_post_photo(message: Message, state: FSMContext) -> None:
+    await _handle_post_content(message, state, "photo")
+
+
+@router.message(PostCreationStates.waiting_for_content, F.document)
+async def handle_post_document(message: Message, state: FSMContext) -> None:
+    await _handle_post_content(message, state, "document")
 
 
 @router.message(Command("cancel"))

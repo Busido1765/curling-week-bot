@@ -1,6 +1,7 @@
 import logging
 
 from aiogram import F, Router
+from aiogram.fsm.context import FSMContext
 from aiogram.filters import CommandStart
 from aiogram.types import CallbackQuery, Message
 
@@ -27,6 +28,7 @@ from bot.services.token_verifier import get_token_verifier
 from bot.services.user_status import UserStatusService
 from bot.services.page_editing import PageEditingService
 from bot.storage import UserRepository
+from bot.handlers.admin import PostCreationStates
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -133,8 +135,11 @@ async def check_subscription_handler(callback: CallbackQuery) -> None:
     & ~F.text.startswith("/")
     & ~F.text.in_({SCHEDULE_BUTTON, FAQ_BUTTON, CONTACTS_BUTTON, PHOTO_BUTTON})
 )
-async def confirmed_user_fallback(message: Message) -> None:
+async def confirmed_user_fallback(message: Message, state: FSMContext) -> None:
     if message.from_user is None:
+        return
+    current_state = await state.get_state()
+    if current_state == PostCreationStates.waiting_for_content.state:
         return
     editing_service = PageEditingService(
         session_maker=message.bot.session_maker,
