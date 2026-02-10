@@ -143,7 +143,7 @@ async def back_button_handler(message: Message, state: FSMContext) -> None:
         await message.answer("Ты в режиме редактирования. Нажми ❌ Отмена.")
         return
 
-    await message.answer("Меню 👇", reply_markup=confirmed_menu_keyboard())
+    await message.answer("Выбери раздел 👇", reply_markup=confirmed_menu_keyboard())
 
 @router.message(
     ~StateFilter(PostCreationStates.waiting_for_content),
