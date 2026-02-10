@@ -13,6 +13,7 @@ from bot.keyboards.post_confirm import (
     POST_CLEAR_CALLBACK,
     POST_PREVIEW_CALLBACK,
     POST_SEND_CALLBACK,
+    post_cancel_keyboard,
     post_confirm_keyboard,
 )
 from bot.services.page_editing import PageEditingService
@@ -125,13 +126,15 @@ async def start_post_creation(message: Message, state: FSMContext) -> None:
     await state.set_state(PostCreationStates.waiting_for_content)
     await message.answer(
         "Создаём анонс для участников 👇\n"
-        "Пришли одним или несколькими сообщениями:\n"
-        "1) Текст (можно с форматированием Telegram)\n"
-        "2) ИЛИ фото/видео/гиф (можно с подписью)\n"
-        "3) (Необязательно) файл (документ) — он будет отправлен участникам ОТДЕЛЬНЫМ сообщением после основного поста.\n\n"
-        "Можно отправлять в любом порядке — я соберу черновик и покажу превью.\n"
-        "Когда будешь готов — нажми «✅ Отправить всем». Чтобы отменить — «❌ Отмена».",
-        reply_markup=post_confirm_keyboard(),
+        "Пришли сообщением:\n"
+        "• текст (можно с форматированием Telegram)\n"
+        "и/или\n"
+        "• фото/видео/гиф (можно с подписью)\n"
+        "и/или\n"
+        "• файл (документ) — он будет отправлен участникам ОТДЕЛЬНЫМ сообщением после основного поста.\n\n"
+        "Можно отправлять в любом порядке — я соберу черновик и сразу покажу превью.\n"
+        "Отменить создание — нажми «❌ Отмена».",
+        reply_markup=post_cancel_keyboard(),
     )
 
 
@@ -162,14 +165,17 @@ async def _handle_post_content(message: Message) -> None:
     except UnsupportedPostContentError as exc:
         if str(exc) == "album":
             await message.answer(
-                "Альбомы не поддерживаются. Пришли одно фото/видео/гиф одним сообщением."
+                "Альбомы не поддерживаются. Пришли одно фото/видео/гиф одним сообщением.",
+                reply_markup=post_cancel_keyboard(),
             )
             return
         await message.answer(
-            "Этот тип сообщения не подходит для анонса. Пришли текст, фото/видео/гиф или файл (документ)."
+            "Этот тип сообщения не подходит для анонса. Пришли текст, фото/видео/гиф или файл (документ).",
+            reply_markup=post_cancel_keyboard(),
         )
         return
 
+    await service.send_preview(message.bot, message.chat.id, result.post)
     if result.notice:
         await message.answer(result.notice)
     await message.answer("Черновик обновлён.", reply_markup=post_confirm_keyboard())
@@ -189,11 +195,13 @@ async def handle_post_unsupported(message: Message) -> None:
         return
     if message.media_group_id:
         await message.answer(
-            "Альбомы не поддерживаются. Пришли одно фото/видео/гиф одним сообщением."
+            "Альбомы не поддерживаются. Пришли одно фото/видео/гиф одним сообщением.",
+            reply_markup=post_cancel_keyboard(),
         )
         return
     await message.answer(
-        "Этот тип сообщения не подходит для анонса. Пришли текст, фото/видео/гиф или файл (документ)."
+        "Этот тип сообщения не подходит для анонса. Пришли текст, фото/видео/гиф или файл (документ).",
+        reply_markup=post_cancel_keyboard(),
     )
 
 
@@ -239,13 +247,10 @@ async def clear_post_callback(callback: CallbackQuery) -> None:
         session_maker=callback.bot.session_maker,
         post_repository=PostRepository(),
     )
-    await post_service.clear_draft(callback.from_user.id)
+    await post_service.cancel_draft(callback.from_user.id)
     await callback.answer()
     if callback.message:
-        await callback.message.answer(
-            "Черновик очищен. Можешь прислать новый текст/медиа/файл.",
-            reply_markup=post_confirm_keyboard(),
-        )
+        await callback.message.answer("Создание анонса отменено.")
 
 
 @router.callback_query(F.data == POST_CANCEL_CALLBACK)
