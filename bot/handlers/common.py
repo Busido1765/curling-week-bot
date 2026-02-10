@@ -63,27 +63,45 @@ async def _send_page(message: Message, key: str) -> None:
         reply_markup = page_edit_keyboard(key)
     else:
         reply_markup = await _get_confirmed_menu(message)
-    if render.content_type == "photo" and render.file_id:
-        logger.info("PAGE_VIEW_HANDLER content_length=%s", len(render.caption or ""))
+    if render.main_content_type == "photo" and render.main_photo_file_id:
+        logger.info("PAGE_VIEW_HANDLER content_length=%s", len(render.main_photo_caption or ""))
         await message.answer_photo(
-            render.file_id,
-            caption=render.caption,
-            caption_entities=render.caption_entities,
+            render.main_photo_file_id,
+            caption=render.main_photo_caption,
+            caption_entities=render.main_photo_caption_entities,
             reply_markup=reply_markup,
         )
+        if render.extra_document_file_id:
+            await message.answer_document(
+                render.extra_document_file_id,
+                caption=render.extra_document_caption,
+                caption_entities=render.extra_document_caption_entities,
+            )
         return
-    if render.content_type == "document" and render.file_id:
-        logger.info("PAGE_VIEW_HANDLER content_length=%s", len(render.caption or ""))
+
+    if render.main_text:
+        logger.info("PAGE_VIEW_HANDLER content_length=%s", len(render.main_text))
+        await message.answer(render.main_text, reply_markup=reply_markup, entities=render.main_entities)
+        if render.extra_document_file_id:
+            await message.answer_document(
+                render.extra_document_file_id,
+                caption=render.extra_document_caption,
+                caption_entities=render.extra_document_caption_entities,
+            )
+        return
+
+    if render.extra_document_file_id:
+        logger.info("PAGE_VIEW_HANDLER content_length=%s", len(render.extra_document_caption or ""))
         await message.answer_document(
-            render.file_id,
-            caption=render.caption,
-            caption_entities=render.caption_entities,
+            render.extra_document_file_id,
+            caption=render.extra_document_caption,
+            caption_entities=render.extra_document_caption_entities,
             reply_markup=reply_markup,
         )
         return
-    content = render.text or DEFAULT_PAGE_MESSAGE
-    logger.info("PAGE_VIEW_HANDLER content_length=%s", len(content))
-    await message.answer(content, reply_markup=reply_markup, entities=render.entities)
+
+    logger.info("PAGE_VIEW_HANDLER content_length=%s", len(DEFAULT_PAGE_MESSAGE))
+    await message.answer(DEFAULT_PAGE_MESSAGE, reply_markup=reply_markup)
 
 
 @router.message(Command("faq"))

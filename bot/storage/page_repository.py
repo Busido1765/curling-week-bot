@@ -81,18 +81,15 @@ class PageRepository:
             page = Page(
                 key=key,
                 content=safe_caption,
-                content_type="document",
-                file_id=file_id,
-                caption=safe_caption,
-                caption_entities=caption_entities,
+                content_type="text",
+                text="",
+                extra_document_file_id=file_id,
+                extra_document_caption=safe_caption,
+                extra_document_caption_entities=caption_entities,
             )
         else:
-            page.content_type = "document"
-            page.content = safe_caption
-            page.text = None
-            page.entities = None
-            page.file_id = file_id
-            page.caption = safe_caption
-            page.caption_entities = caption_entities
+            page.extra_document_file_id = file_id
+            page.extra_document_caption = safe_caption
+            page.extra_document_caption_entities = caption_entities
         session.add(page)
         return page

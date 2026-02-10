@@ -24,12 +24,15 @@ class PageResult:
 
 @dataclass(frozen=True)
 class PageRender:
-    content_type: str
-    text: str | None = None
-    entities: list | None = None
-    file_id: str | None = None
-    caption: str | None = None
-    caption_entities: list | None = None
+    main_content_type: str
+    main_text: str | None = None
+    main_entities: list | None = None
+    main_photo_file_id: str | None = None
+    main_photo_caption: str | None = None
+    main_photo_caption_entities: list | None = None
+    extra_document_file_id: str | None = None
+    extra_document_caption: str | None = None
+    extra_document_caption_entities: list | None = None
 
 
 class PageService:
@@ -57,32 +60,39 @@ class PageService:
         async with self._session_maker() as session:
             page = await self._page_repository.get_by_key(session, key)
             if page is None:
-                return PageRender(content_type="text", text=None)
+                return PageRender(main_content_type="text", main_text=None)
+
+            extra_document_file_id = page.extra_document_file_id
+            extra_document_caption = page.extra_document_caption or ""
+            extra_document_caption_entities = deserialize_entities(page.extra_document_caption_entities)
 
             if page.content_type == "photo" and page.file_id:
                 return PageRender(
-                    content_type="photo",
-                    file_id=page.file_id,
-                    caption=page.caption or "",
-                    caption_entities=deserialize_entities(page.caption_entities),
+                    main_content_type="photo",
+                    main_photo_file_id=page.file_id,
+                    main_photo_caption=page.caption or "",
+                    main_photo_caption_entities=deserialize_entities(page.caption_entities),
+                    extra_document_file_id=extra_document_file_id,
+                    extra_document_caption=extra_document_caption,
+                    extra_document_caption_entities=extra_document_caption_entities,
                 )
 
-            if page.content_type == "document" and page.file_id:
-                return PageRender(
-                    content_type="document",
-                    file_id=page.file_id,
-                    caption=page.caption or "",
-                    caption_entities=deserialize_entities(page.caption_entities),
-                )
+            if page.content_type == "document" and page.file_id and not extra_document_file_id:
+                extra_document_file_id = page.file_id
+                extra_document_caption = page.caption or ""
+                extra_document_caption_entities = deserialize_entities(page.caption_entities)
 
             text = page.text if page.text is not None else page.content
             text = text.strip()
             if not text:
-                return PageRender(content_type="text", text=None)
+                text = None
             return PageRender(
-                content_type="text",
-                text=text,
-                entities=deserialize_entities(page.entities),
+                main_content_type="text",
+                main_text=text,
+                main_entities=deserialize_entities(page.entities),
+                extra_document_file_id=extra_document_file_id,
+                extra_document_caption=extra_document_caption,
+                extra_document_caption_entities=extra_document_caption_entities,
             )
 
     async def update_page(self, key: str, content: str) -> PageResult:
