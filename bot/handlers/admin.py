@@ -187,6 +187,8 @@ async def _handle_post_content(message: Message) -> None:
     F.text,
 )
 async def post_text_handler(message: Message) -> None:
+    if not _is_admin(message):
+        return
     admin_id = message.from_user.id if message.from_user else None
     text_prefix = (message.text or "")[:30]
     logger.info("post_text_handler hit admin_id=%s text_prefix=%r", admin_id, text_prefix)
@@ -203,12 +205,14 @@ async def post_text_handler(message: Message) -> None:
     StateFilter(PostCreationStates.waiting_for_content),
     F.photo | F.video | F.animation | F.document,
 )
-async def handle_post_media_content(message: Message) -> None:
+async def post_media_handler(message: Message) -> None:
+    if not _is_admin(message):
+        return
     await _handle_post_content(message)
 
 
-@router.message(PostCreationStates.waiting_for_content)
-async def handle_post_unsupported(message: Message) -> None:
+@router.message(StateFilter(PostCreationStates.waiting_for_content))
+async def post_unsupported_handler(message: Message) -> None:
     if not _is_admin(message):
         return
     if message.media_group_id:
