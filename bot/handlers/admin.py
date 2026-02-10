@@ -36,6 +36,7 @@ from bot.services.pages import (
 from bot.services.post_service import PostService, UnsupportedPostContentError
 from bot.storage import PageRepository, PostRepository, UserRepository
 from bot.utils import serialize_entities
+from bot.utils.admin import is_admin_event
 
 
 router = Router()
@@ -60,16 +61,8 @@ async def admin_menu(message: Message) -> None:
     await message.answer("Admin menu is under construction")
 
 
-def _is_admin(message: Message) -> bool:
-    if message.from_user is None:
-        return False
-    return message.from_user.id in message.bot.settings.admin_ids
-
-
-def _is_admin_callback(callback: CallbackQuery) -> bool:
-    if callback.from_user is None:
-        return False
-    return callback.from_user.id in callback.bot.settings.admin_ids
+def _is_admin(message: Message | CallbackQuery) -> bool:
+    return is_admin_event(message)
 
 
 async def _send_page_with_edit_button(message: Message, key: str) -> None:
@@ -99,21 +92,37 @@ async def _send_page_with_edit_button(message: Message, key: str) -> None:
     await message.answer(content, reply_markup=reply_markup, entities=render.entities)
 
 
-async def _start_page_editing(message: Message, state: FSMContext, page_key: str) -> None:
-    if not _is_admin(message) or message.from_user is None:
-        await message.answer("Недостаточно прав")
-        return
+async def _start_page_editing(
+    message: Message,
+    state: FSMContext,
+    page_key: str,
+    user_id: int | None = None,
+    username: str | None = None,
+) -> None:
     if page_key not in PAGE_KEYS:
         await message.answer("Недоступная страница")
         return
+
+    if user_id is None:
+        if not _is_admin(message) or message.from_user is None:
+            await message.answer("Недостаточно прав")
+            return
+        actor_user_id = message.from_user.id
+        actor_username = message.from_user.username
+    else:
+        if user_id not in message.bot.settings.admin_ids:
+            await message.answer("Недостаточно прав")
+            return
+        actor_user_id = user_id
+        actor_username = username
 
     service = PageEditingService(
         session_maker=message.bot.session_maker,
         user_repository=UserRepository(),
     )
     await service.start_editing(
-        tg_id=message.from_user.id,
-        username=message.from_user.username,
+        tg_id=actor_user_id,
+        username=actor_username,
         key=page_key,
     )
     await state.set_state(PageEditingStates.waiting_for_content)
@@ -130,7 +139,10 @@ async def _start_page_editing(message: Message, state: FSMContext, page_key: str
 
 @router.callback_query(F.data.startswith(EDIT_PAGE_CALLBACK_PREFIX))
 async def edit_page_callback(callback: CallbackQuery, state: FSMContext) -> None:
-    if not _is_admin_callback(callback):
+    is_admin = _is_admin(callback)
+    user_id = callback.from_user.id if callback.from_user else None
+    logger.info("PAGE_EDIT_CLICK user_id=%s is_admin=%s", user_id, is_admin)
+    if not is_admin:
         await callback.answer("Недостаточно прав")
         return
     data = callback.data or ""
@@ -141,7 +153,13 @@ async def edit_page_callback(callback: CallbackQuery, state: FSMContext) -> None
 
     await callback.answer()
     if callback.message:
-        await _start_page_editing(callback.message, state, page_key)
+        await _start_page_editing(
+            callback.message,
+            state,
+            page_key,
+            user_id=user_id,
+            username=callback.from_user.username if callback.from_user else None,
+        )
 
 
 @router.message(Command("edit_faq"))
@@ -293,7 +311,7 @@ async def cancel_editing(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(F.data == POST_PREVIEW_CALLBACK)
 async def preview_post_callback(callback: CallbackQuery) -> None:
-    if not _is_admin_callback(callback) or callback.from_user is None:
+    if not _is_admin(callback) or callback.from_user is None:
         await callback.answer("Недостаточно прав")
         return
     post_service = PostService(
@@ -312,7 +330,7 @@ async def preview_post_callback(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data == POST_CLEAR_CALLBACK)
 async def clear_post_callback(callback: CallbackQuery) -> None:
-    if not _is_admin_callback(callback) or callback.from_user is None:
+    if not _is_admin(callback) or callback.from_user is None:
         await callback.answer("Недостаточно прав")
         return
     post_service = PostService(
@@ -327,7 +345,7 @@ async def clear_post_callback(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data == POST_CANCEL_CALLBACK)
 async def cancel_post_callback(callback: CallbackQuery, state: FSMContext) -> None:
-    if not _is_admin_callback(callback) or callback.from_user is None:
+    if not _is_admin(callback) or callback.from_user is None:
         await callback.answer("Недостаточно прав")
         return
     post_service = PostService(
@@ -343,7 +361,7 @@ async def cancel_post_callback(callback: CallbackQuery, state: FSMContext) -> No
 
 @router.callback_query(F.data == POST_SEND_CALLBACK)
 async def send_post_callback(callback: CallbackQuery, state: FSMContext) -> None:
-    if not _is_admin_callback(callback) or callback.from_user is None:
+    if not _is_admin(callback) or callback.from_user is None:
         await callback.answer("Недостаточно прав")
         return
 
@@ -476,7 +494,7 @@ async def handle_page_editing_unsupported(message: Message) -> None:
 
 @router.callback_query(F.data == PAGE_DRAFT_SAVE_CALLBACK)
 async def save_page_draft_callback(callback: CallbackQuery, state: FSMContext) -> None:
-    if not _is_admin_callback(callback) or callback.from_user is None:
+    if not _is_admin(callback) or callback.from_user is None:
         await callback.answer("Недостаточно прав")
         return
 
@@ -530,7 +548,7 @@ async def save_page_draft_callback(callback: CallbackQuery, state: FSMContext) -
 
 @router.callback_query(F.data == PAGE_DRAFT_CANCEL_CALLBACK)
 async def cancel_page_draft_callback(callback: CallbackQuery, state: FSMContext) -> None:
-    if not _is_admin_callback(callback) or callback.from_user is None:
+    if not _is_admin(callback) or callback.from_user is None:
         await callback.answer("Недостаточно прав")
         return
 
