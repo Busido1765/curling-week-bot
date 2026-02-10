@@ -1,6 +1,7 @@
 import logging
 
 from aiogram import F, Router
+from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
@@ -182,10 +183,27 @@ async def _handle_post_content(message: Message) -> None:
 
 
 @router.message(
-    PostCreationStates.waiting_for_content,
-    (F.text & ~F.text.startswith("/")) | F.photo | F.video | F.animation | F.document,
+    StateFilter(PostCreationStates.waiting_for_content),
+    F.text,
 )
-async def handle_post_content(message: Message) -> None:
+async def post_text_handler(message: Message) -> None:
+    admin_id = message.from_user.id if message.from_user else None
+    text_prefix = (message.text or "")[:30]
+    logger.info("post_text_handler hit admin_id=%s text_prefix=%r", admin_id, text_prefix)
+    if (message.text or "").startswith("/"):
+        await message.answer(
+            "Ты в режиме создания поста. Нажми ❌ Отмена или пришли контент.",
+            reply_markup=post_cancel_keyboard(),
+        )
+        return
+    await _handle_post_content(message)
+
+
+@router.message(
+    StateFilter(PostCreationStates.waiting_for_content),
+    F.photo | F.video | F.animation | F.document,
+)
+async def handle_post_media_content(message: Message) -> None:
     await _handle_post_content(message)
 
 
