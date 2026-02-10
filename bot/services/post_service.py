@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from bot.models import Post
 from bot.storage import PostRepository, UserRepository
-from bot.utils import deserialize_entities, serialize_entities
+from bot.utils import deserialize_entities, serialize_entities, should_notify_document_update
 
 
 class UnsupportedPostContentError(ValueError):
@@ -172,7 +172,11 @@ class PostService:
                         "caption": message.caption,
                         "caption_entities": serialize_entities(message.caption_entities),
                     }
-                    notice = "Файл заменён. Он будет отправлен отдельным сообщением."
+                    if message.chat and message.from_user and should_notify_document_update(
+                        chat_id=message.chat.id,
+                        user_id=message.from_user.id,
+                    ):
+                        notice = "Файл заменён. Он будет отправлен отдельным сообщением."
                     update_type = "document"
                 else:
                     raise UnsupportedPostContentError("unsupported")
