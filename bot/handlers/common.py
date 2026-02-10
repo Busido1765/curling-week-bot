@@ -25,6 +25,7 @@ from bot.services.pages import (
 from bot.services.user_status import UserStatusService
 from bot.storage import PageRepository
 from bot.storage import UserRepository
+from bot.utils.admin import is_admin_event
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -44,9 +45,7 @@ async def _get_confirmed_menu(message: Message) -> ReplyKeyboardMarkup | None:
 
 
 def _is_admin(message: Message) -> bool:
-    if message.from_user is None:
-        return False
-    return message.from_user.id in message.bot.settings.admin_ids
+    return is_admin_event(message)
 
 
 async def _send_page(message: Message, key: str) -> None:
