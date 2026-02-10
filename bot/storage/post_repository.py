@@ -16,10 +16,10 @@ class PostRepository:
         created_by: int,
         content_type: str,
         text: str | None,
-        entities: list[dict] | None,
+        entities: list[dict] | dict | None,
         file_id: str | None,
         caption: str | None,
-        caption_entities: list[dict] | None,
+        caption_entities: list[dict] | dict | None,
     ) -> Post:
         await session.execute(
             update(Post)
@@ -41,6 +41,17 @@ class PostRepository:
 
     async def get(self, session: AsyncSession, post_id: int) -> Post | None:
         result = await session.execute(select(Post).where(Post.id == post_id))
+        return result.scalar_one_or_none()
+
+    async def get_active_draft_by_admin(
+        self, session: AsyncSession, created_by: int
+    ) -> Post | None:
+        result = await session.execute(
+            select(Post)
+            .where(Post.created_by == created_by, Post.status == "draft")
+            .order_by(Post.created_at.desc())
+            .limit(1)
+        )
         return result.scalar_one_or_none()
 
     async def mark_sent(

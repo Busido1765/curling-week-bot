@@ -9,11 +9,12 @@ from bot.filters import Command
 
 from bot.keyboards.page_edit import EDIT_PAGE_CALLBACK_PREFIX, page_edit_keyboard
 from bot.keyboards.post_confirm import (
-    POST_CANCEL_CALLBACK_PREFIX,
-    POST_SEND_CALLBACK_PREFIX,
+    POST_CANCEL_CALLBACK,
+    POST_CLEAR_CALLBACK,
+    POST_PREVIEW_CALLBACK,
+    POST_SEND_CALLBACK,
     post_confirm_keyboard,
 )
-from bot.services.broadcast import BroadcastService
 from bot.services.page_editing import PageEditingService
 from bot.services.pages import (
     DEFAULT_PAGE_MESSAGE,
@@ -116,51 +117,84 @@ async def start_post_creation(message: Message, state: FSMContext) -> None:
     if not _is_admin(message):
         await message.answer("Недостаточно прав")
         return
+    service = PostService(
+        session_maker=message.bot.session_maker,
+        post_repository=PostRepository(),
+    )
+    await service.ensure_draft(message.from_user.id)
     await state.set_state(PostCreationStates.waiting_for_content)
     await message.answer(
-        "Пришли текст/фото/файл для анонса. Можно с форматированием как в Telegram."
+        "Создаём анонс для участников 👇\n"
+        "Пришли одним или несколькими сообщениями:\n"
+        "1) Текст (можно с форматированием Telegram)\n"
+        "2) ИЛИ фото/видео/гиф (можно с подписью)\n"
+        "3) (Необязательно) файл (документ) — он будет отправлен участникам ОТДЕЛЬНЫМ сообщением после основного поста.\n\n"
+        "Можно отправлять в любом порядке — я соберу черновик и покажу превью.\n"
+        "Когда будешь готов — нажми «✅ Отправить всем». Чтобы отменить — «❌ Отмена».",
+        reply_markup=post_confirm_keyboard(),
     )
 
 
-async def _handle_post_content(message: Message, state: FSMContext, content_type: str) -> None:
-    if not _is_admin(message):
+async def _handle_post_content(message: Message) -> None:
+    if not _is_admin(message) or message.from_user is None:
         return
-    logger.info(
-        "Post content received type=%s admin_id=%s",
-        content_type,
-        message.from_user.id if message.from_user else None,
+    content_type = (
+        "text"
+        if message.text
+        else "photo"
+        if message.photo
+        else "video"
+        if message.video
+        else "animation"
+        if message.animation
+        else "document"
+        if message.document
+        else "unsupported"
     )
+    logger.info("Post content received type=%s admin_id=%s", content_type, message.from_user.id)
+
     service = PostService(
         session_maker=message.bot.session_maker,
         post_repository=PostRepository(),
     )
     try:
-        post = await service.create_draft_from_message(message.from_user.id, message)
-    except UnsupportedPostContentError:
-        await message.answer("Пока поддерживаются: текст, фото, документ.")
+        result = await service.apply_message_to_draft(message.from_user.id, message)
+    except UnsupportedPostContentError as exc:
+        if str(exc) == "album":
+            await message.answer(
+                "Альбомы не поддерживаются. Пришли одно фото/видео/гиф одним сообщением."
+            )
+            return
+        await message.answer(
+            "Этот тип сообщения не подходит для анонса. Пришли текст, фото/видео/гиф или файл (документ)."
+        )
         return
 
-    await state.clear()
-    await service.render_post_to_chat(message.bot, message.chat.id, post)
+    if result.notice:
+        await message.answer(result.notice)
+    await message.answer("Черновик обновлён.", reply_markup=post_confirm_keyboard())
+
+
+@router.message(
+    PostCreationStates.waiting_for_content,
+    (F.text & ~F.text.startswith("/")) | F.photo | F.video | F.animation | F.document,
+)
+async def handle_post_content(message: Message) -> None:
+    await _handle_post_content(message)
+
+
+@router.message(PostCreationStates.waiting_for_content)
+async def handle_post_unsupported(message: Message) -> None:
+    if not _is_admin(message):
+        return
+    if message.media_group_id:
+        await message.answer(
+            "Альбомы не поддерживаются. Пришли одно фото/видео/гиф одним сообщением."
+        )
+        return
     await message.answer(
-        "Отправить всем?",
-        reply_markup=post_confirm_keyboard(post.id),
+        "Этот тип сообщения не подходит для анонса. Пришли текст, фото/видео/гиф или файл (документ)."
     )
-
-
-@router.message(PostCreationStates.waiting_for_content, F.text, ~Command())
-async def handle_post_text(message: Message, state: FSMContext) -> None:
-    await _handle_post_content(message, state, "text")
-
-
-@router.message(PostCreationStates.waiting_for_content, F.photo)
-async def handle_post_photo(message: Message, state: FSMContext) -> None:
-    await _handle_post_content(message, state, "photo")
-
-
-@router.message(PostCreationStates.waiting_for_content, F.document)
-async def handle_post_document(message: Message, state: FSMContext) -> None:
-    await _handle_post_content(message, state, "document")
 
 
 @router.message(Command("cancel"))
@@ -177,81 +211,95 @@ async def cancel_editing(message: Message, state: FSMContext) -> None:
     await message.answer("Отменено")
 
 
-@router.callback_query(F.data.startswith(POST_CANCEL_CALLBACK_PREFIX))
-async def cancel_post_callback(callback: CallbackQuery) -> None:
-    if not _is_admin_callback(callback):
+@router.callback_query(F.data == POST_PREVIEW_CALLBACK)
+async def preview_post_callback(callback: CallbackQuery) -> None:
+    if not _is_admin_callback(callback) or callback.from_user is None:
         await callback.answer("Недостаточно прав")
         return
-    data = callback.data or ""
-    post_id_raw = data[len(POST_CANCEL_CALLBACK_PREFIX) :]
-    if not post_id_raw.isdigit():
-        await callback.answer("Некорректный пост")
+    post_service = PostService(
+        session_maker=callback.bot.session_maker,
+        post_repository=PostRepository(),
+    )
+    draft = await post_service.get_active_draft(callback.from_user.id)
+    if not draft or post_service.is_draft_empty(draft):
+        await callback.answer("Черновик пуст", show_alert=True)
         return
-    post_id = int(post_id_raw)
-    post_repository = PostRepository()
-    async with callback.bot.session_maker() as session:
-        async with session.begin():
-            post = await post_repository.get(session, post_id)
-            if post is None:
-                await callback.answer("Пост не найден")
-                return
-            if post.status != "draft":
-                await callback.answer("Уже отправлено/отменено")
-                return
-            await post_repository.mark_canceled(session, post_id)
     await callback.answer()
     if callback.message:
-        await callback.message.answer("Отменено")
+        await post_service.send_preview(callback.bot, callback.message.chat.id, draft)
+        await callback.message.answer("Это превью.", reply_markup=post_confirm_keyboard())
 
 
-@router.callback_query(F.data.startswith(POST_SEND_CALLBACK_PREFIX))
-async def send_post_callback(callback: CallbackQuery) -> None:
-    if not _is_admin_callback(callback):
+@router.callback_query(F.data == POST_CLEAR_CALLBACK)
+async def clear_post_callback(callback: CallbackQuery) -> None:
+    if not _is_admin_callback(callback) or callback.from_user is None:
         await callback.answer("Недостаточно прав")
         return
-    data = callback.data or ""
-    post_id_raw = data[len(POST_SEND_CALLBACK_PREFIX) :]
-    if not post_id_raw.isdigit():
-        await callback.answer("Некорректный пост")
-        return
-    post_id = int(post_id_raw)
-
-    async with callback.bot.session_maker() as session:
-        post_repository = PostRepository()
-        post = await post_repository.get(session, post_id)
-        if post is None:
-            await callback.answer("Пост не найден")
-            return
-        if post.status != "draft":
-            await callback.answer("Уже отправлено/отменено")
-            return
-
+    post_service = PostService(
+        session_maker=callback.bot.session_maker,
+        post_repository=PostRepository(),
+    )
+    await post_service.clear_draft(callback.from_user.id)
     await callback.answer()
     if callback.message:
-        await callback.message.answer("Начинаю рассылку…")
+        await callback.message.answer(
+            "Черновик очищен. Можешь прислать новый текст/медиа/файл.",
+            reply_markup=post_confirm_keyboard(),
+        )
+
+
+@router.callback_query(F.data == POST_CANCEL_CALLBACK)
+async def cancel_post_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    if not _is_admin_callback(callback) or callback.from_user is None:
+        await callback.answer("Недостаточно прав")
+        return
+    post_service = PostService(
+        session_maker=callback.bot.session_maker,
+        post_repository=PostRepository(),
+    )
+    await post_service.cancel_draft(callback.from_user.id)
+    await state.clear()
+    await callback.answer()
+    if callback.message:
+        await callback.message.answer("Создание анонса отменено.")
+
+
+@router.callback_query(F.data == POST_SEND_CALLBACK)
+async def send_post_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    if not _is_admin_callback(callback) or callback.from_user is None:
+        await callback.answer("Недостаточно прав")
+        return
 
     settings = callback.bot.settings
     post_service = PostService(
         session_maker=callback.bot.session_maker,
         post_repository=PostRepository(),
     )
-    broadcast_service = BroadcastService(
-        session_maker=callback.bot.session_maker,
-        post_repository=PostRepository(),
+    draft = await post_service.get_active_draft(callback.from_user.id)
+    if not draft or post_service.is_draft_empty(draft):
+        await callback.answer()
+        if callback.message:
+            await callback.message.answer(
+                "Нечего отправлять: черновик пустой. Создание анонса отменено."
+            )
+        await post_service.cancel_draft(callback.from_user.id)
+        await state.clear()
+        return
+
+    await callback.answer()
+    if callback.message:
+        await callback.message.answer("Начинаю рассылку…")
+
+    success_count, fail_count = await post_service.broadcast_draft(
+        callback.bot,
+        draft,
         user_repository=UserRepository(),
-        post_service=post_service,
         send_delay_seconds=settings.broadcast_delay_seconds,
         batch_log_every=settings.broadcast_batch_log_every,
     )
-    try:
-        success_count, fail_count = await broadcast_service.broadcast_post(
-            callback.bot, post_id
-        )
-    except ValueError:
-        if callback.message:
-            await callback.message.answer("Уже отправлено/отменено")
-        return
+    await state.clear()
     if callback.message:
+        await callback.message.answer("✅ Отправлено всем участникам.")
         await callback.message.answer(
             f"Готово. Успешно: {success_count}, Ошибок: {fail_count}"
         )
