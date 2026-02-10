@@ -6,6 +6,7 @@ from aiogram.filters import CommandStart, StateFilter
 from aiogram.types import CallbackQuery, Message
 
 from bot.keyboards import (
+    BACK_BUTTON,
     CONTACTS_BUTTON,
     FAQ_BUTTON,
     PHOTO_BUTTON,
@@ -130,12 +131,26 @@ async def check_subscription_handler(callback: CallbackQuery) -> None:
     )
 
 
+
+
+@router.message(F.text == BACK_BUTTON)
+async def back_button_handler(message: Message, state: FSMContext) -> None:
+    current_state = await state.get_state()
+    if current_state in {
+        PostCreationStates.waiting_for_content.state,
+        PageEditingStates.waiting_for_content.state,
+    }:
+        await message.answer("Ты в режиме редактирования. Нажми ❌ Отмена.")
+        return
+
+    await message.answer("Меню 👇", reply_markup=confirmed_menu_keyboard())
+
 @router.message(
     ~StateFilter(PostCreationStates.waiting_for_content),
     ~StateFilter(PageEditingStates.waiting_for_content),
     F.text
     & ~F.text.startswith("/")
-    & ~F.text.in_({SCHEDULE_BUTTON, FAQ_BUTTON, CONTACTS_BUTTON, PHOTO_BUTTON})
+    & ~F.text.in_({SCHEDULE_BUTTON, FAQ_BUTTON, CONTACTS_BUTTON, PHOTO_BUTTON, BACK_BUTTON})
 )
 async def confirmed_user_fallback(message: Message, state: FSMContext) -> None:
     if message.from_user is None:

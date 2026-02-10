@@ -9,11 +9,9 @@ from bot.keyboards import (
     FAQ_BUTTON,
     PHOTO_BUTTON,
     SCHEDULE_BUTTON,
-    confirmed_menu_keyboard,
+    back_keyboard,
 )
 from bot.keyboards.page_edit import page_edit_keyboard
-from bot.models import RegistrationStatus
-from bot.services.page_editing import PageEditingService
 from bot.services.pages import (
     DEFAULT_PAGE_MESSAGE,
     PAGE_KEY_CONTACTS,
@@ -22,26 +20,11 @@ from bot.services.pages import (
     PAGE_KEY_SCHEDULE,
     PageService,
 )
-from bot.services.user_status import UserStatusService
 from bot.storage import PageRepository
-from bot.storage import UserRepository
 from bot.utils.admin import is_admin_event
 
 router = Router()
 logger = logging.getLogger(__name__)
-
-
-async def _get_confirmed_menu(message: Message) -> ReplyKeyboardMarkup | None:
-    if message.from_user is None:
-        return None
-    service = UserStatusService(
-        session_maker=message.bot.session_maker,
-        user_repository=UserRepository(),
-    )
-    status = await service.get_status(message.from_user.id)
-    if status == RegistrationStatus.CONFIRMED:
-        return confirmed_menu_keyboard()
-    return None
 
 
 def _is_admin(message: Message) -> bool:
@@ -58,36 +41,46 @@ async def _send_page(message: Message, key: str) -> None:
         page_repository=PageRepository(),
     )
     render = await service.render_page(key)
-    reply_markup = None
-    if is_admin:
-        reply_markup = page_edit_keyboard(key)
-    else:
-        reply_markup = await _get_confirmed_menu(message)
+
+    admin_markup: ReplyKeyboardMarkup | None = page_edit_keyboard(key) if is_admin else None
+    user_markup: ReplyKeyboardMarkup | None = None if is_admin else back_keyboard()
+
     if render.main_content_type == "photo" and render.main_photo_file_id:
         logger.info("PAGE_VIEW_HANDLER content_length=%s", len(render.main_photo_caption or ""))
         await message.answer_photo(
             render.main_photo_file_id,
             caption=render.main_photo_caption,
             caption_entities=render.main_photo_caption_entities,
-            reply_markup=reply_markup,
+            reply_markup=admin_markup,
         )
         if render.extra_document_file_id:
             await message.answer_document(
                 render.extra_document_file_id,
                 caption=render.extra_document_caption,
                 caption_entities=render.extra_document_caption_entities,
+                reply_markup=user_markup,
             )
+            return
+        if user_markup:
+            await message.answer("Выбери раздел 👇", reply_markup=user_markup)
         return
 
     if render.main_text:
         logger.info("PAGE_VIEW_HANDLER content_length=%s", len(render.main_text))
-        await message.answer(render.main_text, reply_markup=reply_markup, entities=render.main_entities)
         if render.extra_document_file_id:
+            await message.answer(render.main_text, reply_markup=admin_markup, entities=render.main_entities)
             await message.answer_document(
                 render.extra_document_file_id,
                 caption=render.extra_document_caption,
                 caption_entities=render.extra_document_caption_entities,
+                reply_markup=user_markup,
             )
+            return
+        await message.answer(
+            render.main_text,
+            reply_markup=admin_markup or user_markup,
+            entities=render.main_entities,
+        )
         return
 
     if render.extra_document_file_id:
@@ -96,12 +89,12 @@ async def _send_page(message: Message, key: str) -> None:
             render.extra_document_file_id,
             caption=render.extra_document_caption,
             caption_entities=render.extra_document_caption_entities,
-            reply_markup=reply_markup,
+            reply_markup=admin_markup or user_markup,
         )
         return
 
     logger.info("PAGE_VIEW_HANDLER content_length=%s", len(DEFAULT_PAGE_MESSAGE))
-    await message.answer(DEFAULT_PAGE_MESSAGE, reply_markup=reply_markup)
+    await message.answer(DEFAULT_PAGE_MESSAGE, reply_markup=admin_markup or user_markup)
 
 
 @router.message(Command("faq"))

@@ -1,3 +1,4 @@
+from bot.keyboards.back import BACK_BUTTON, back_keyboard
 from bot.keyboards.confirmed_menu import (
     CONTACTS_BUTTON,
     FAQ_BUTTON,
@@ -8,6 +9,8 @@ from bot.keyboards.confirmed_menu import (
 from bot.keyboards.subscription import subscription_check_keyboard
 
 __all__ = [
+    "BACK_BUTTON",
+    "back_keyboard",
     "CONTACTS_BUTTON",
     "FAQ_BUTTON",
     "PHOTO_BUTTON",
