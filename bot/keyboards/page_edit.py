@@ -1,6 +1,7 @@
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 EDIT_PAGE_CALLBACK_PREFIX = "edit_page:"
+PAGE_DRAFT_SAVE_CALLBACK = "page_draft_save"
 PAGE_DRAFT_CANCEL_CALLBACK = "page_draft_cancel"
 
 
@@ -29,3 +30,21 @@ def page_draft_cancel_keyboard() -> InlineKeyboardMarkup:
         ]
     )
 
+
+def page_confirm_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Сохранить",
+                    callback_data=PAGE_DRAFT_SAVE_CALLBACK,
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❌ Отмена",
+                    callback_data=PAGE_DRAFT_CANCEL_CALLBACK,
+                )
+            ],
+        ]
+    )

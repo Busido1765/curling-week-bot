@@ -11,6 +11,8 @@ from bot.filters import Command
 from bot.keyboards.page_edit import (
     EDIT_PAGE_CALLBACK_PREFIX,
     PAGE_DRAFT_CANCEL_CALLBACK,
+    PAGE_DRAFT_SAVE_CALLBACK,
+    page_confirm_keyboard,
     page_draft_cancel_keyboard,
     page_edit_keyboard,
 )
@@ -538,7 +540,7 @@ async def handle_page_editing_text(message: Message, state: FSMContext) -> None:
     await state.update_data(page_draft=draft)
     await _restore_page_from_draft(message.bot, editing_key, draft)
     await _send_page_draft_preview(message, editing_key, draft)
-    await message.answer("Черновик обновлён.", reply_markup=page_draft_cancel_keyboard())
+    await message.answer("Черновик обновлён.", reply_markup=page_confirm_keyboard())
 
 
 @router.message(
@@ -595,13 +597,7 @@ async def handle_page_editing_media(message: Message, state: FSMContext) -> None
         return
 
     await _send_page_draft_preview(message, editing_key, draft)
-    if message.document:
-        await message.answer(
-            "Файл заменён. Он будет отправлен отдельным сообщением.",
-            reply_markup=page_draft_cancel_keyboard(),
-        )
-        return
-    await message.answer("Черновик обновлён.", reply_markup=page_draft_cancel_keyboard())
+    await message.answer("Черновик обновлён.", reply_markup=page_confirm_keyboard())
 
 
 @router.message(StateFilter(PageEditingStates.waiting_for_content))
@@ -646,6 +642,23 @@ async def _restore_page_from_draft(bot, page_key: str, draft: dict) -> None:
         )
 
 
+
+
+@router.callback_query(F.data == PAGE_DRAFT_SAVE_CALLBACK)
+async def save_page_draft_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    if not _is_admin(callback) or callback.from_user is None:
+        await callback.answer("Недостаточно прав")
+        return
+
+    service = PageEditingService(
+        session_maker=callback.bot.session_maker,
+        user_repository=UserRepository(),
+    )
+    await service.cancel_editing(callback.from_user.id)
+    await state.clear()
+    await callback.answer()
+    if callback.message:
+        await callback.message.answer("Сохранено")
 
 
 @router.callback_query(F.data == PAGE_DRAFT_CANCEL_CALLBACK)
