@@ -3,7 +3,7 @@ import logging
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import CommandStart, StateFilter
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from bot.keyboards import (
     BACK_BUTTON,
@@ -57,7 +57,18 @@ async def start_handler(message: Message) -> None:
 
     if not result.token_provided:
         await message.answer(
-            "Нужна регистрация на сайте. После регистрации открой ссылку, которая приведёт в бот"
+            "Чтобы участвовать в «Неделе кёрлинга в Москве», нужно зарегистрироваться на официальном сайте проекта.\n\n"
+            "После регистрации ты получишь персональную ссылку для входа в бот. Мы также продублируем её на почту — она пригодится, если захочешь вернуться позже.",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="Перейти к регистрации →",
+                            url="https://curlingweek.sport.moscow/",
+                        )
+                    ]
+                ]
+            ),
         )
         return
 
