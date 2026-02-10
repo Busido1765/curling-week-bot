@@ -35,13 +35,24 @@ from bot.services.pages import (
 )
 from bot.services.post_service import PostService, UnsupportedPostContentError
 from bot.storage import PageRepository, PostRepository, UserRepository
-from bot.utils import serialize_entities
+from bot.utils import serialize_entities, should_notify_album, should_notify_document_update
 from bot.utils.admin import is_admin_event
 
 
 router = Router()
 PAGE_KEYS = {PAGE_KEY_FAQ, PAGE_KEY_CONTACTS, PAGE_KEY_SCHEDULE, PAGE_KEY_PHOTO}
 logger = logging.getLogger(__name__)
+
+def _should_send_album_warning(message: Message) -> bool:
+    if not message.media_group_id:
+        return False
+    return should_notify_album(message.chat.id, message.media_group_id)
+
+
+def _is_document_notice_allowed(message: Message) -> bool:
+    if message.from_user is None:
+        return False
+    return should_notify_document_update(chat_id=message.chat.id, user_id=message.from_user.id)
 
 
 class PostCreationStates(StatesGroup):
@@ -283,10 +294,11 @@ async def _handle_post_content(message: Message) -> None:
         result = await service.apply_message_to_draft(message.from_user.id, message)
     except UnsupportedPostContentError as exc:
         if str(exc) == "album":
-            await message.answer(
-                "Альбомы не поддерживаются. Пришли одно фото/видео/гиф одним сообщением.",
-                reply_markup=post_cancel_keyboard(),
-            )
+            if _should_send_album_warning(message):
+                await message.answer(
+                    "Альбомы не поддерживаются. Пришли одно фото/видео/гиф одним сообщением.",
+                    reply_markup=post_cancel_keyboard(),
+                )
             return
         await message.answer(
             "Этот тип сообщения не подходит для анонса. Пришли текст, фото/видео/гиф или файл (документ).",
@@ -294,9 +306,14 @@ async def _handle_post_content(message: Message) -> None:
         )
         return
 
+    is_document_update = bool(message.document)
+    if is_document_update and not result.notice:
+        return
+
     await service.send_preview(message.bot, message.chat.id, result.post)
     if result.notice:
         await message.answer(result.notice)
+        return
     await message.answer("Черновик обновлён.", reply_markup=post_confirm_keyboard())
 
 
@@ -334,10 +351,11 @@ async def post_unsupported_handler(message: Message) -> None:
     if not _is_admin(message):
         return
     if message.media_group_id:
-        await message.answer(
-            "Альбомы не поддерживаются. Пришли одно фото/видео/гиф одним сообщением.",
-            reply_markup=post_cancel_keyboard(),
-        )
+        if _should_send_album_warning(message):
+            await message.answer(
+                "Альбомы не поддерживаются. Пришли одно фото/видео/гиф одним сообщением.",
+                reply_markup=post_cancel_keyboard(),
+            )
         return
     await message.answer(
         "Этот тип сообщения не подходит для анонса. Пришли текст, фото/видео/гиф или файл (документ).",
@@ -544,6 +562,15 @@ async def handle_page_editing_media(message: Message, state: FSMContext) -> None
     draft = dict(data.get("page_draft") or {})
     draft["key"] = editing_key
 
+    if message.media_group_id:
+        if _should_send_album_warning(message):
+            await message.answer(
+                "Альбомы не поддерживаются. Пришли одно фото/видео/гиф одним сообщением.",
+                reply_markup=page_draft_confirm_keyboard(),
+            )
+        return
+
+    should_respond = True
     if message.photo:
         draft.update(
             {
@@ -561,15 +588,32 @@ async def handle_page_editing_media(message: Message, state: FSMContext) -> None
                 "extra_document_caption_entities": message.caption_entities,
             }
         )
+        should_respond = _is_document_notice_allowed(message)
 
     await state.update_data(page_draft=draft)
+    if not should_respond:
+        return
+
     await _send_page_draft_preview(message, editing_key, draft)
+    if message.document:
+        await message.answer(
+            "Файл заменён. Он будет отправлен отдельным сообщением.",
+            reply_markup=page_draft_confirm_keyboard(),
+        )
+        return
     await message.answer("Черновик обновлён.", reply_markup=page_draft_confirm_keyboard())
 
 
 @router.message(StateFilter(PageEditingStates.waiting_for_content))
 async def handle_page_editing_unsupported(message: Message) -> None:
     if not _is_admin(message):
+        return
+    if message.media_group_id:
+        if _should_send_album_warning(message):
+            await message.answer(
+                "Альбомы не поддерживаются. Пришли одно фото/видео/гиф одним сообщением.",
+                reply_markup=page_draft_confirm_keyboard(),
+            )
         return
     await message.answer("Пока поддерживаются: текст, фото, документ.")
 
