@@ -2,7 +2,7 @@ import logging
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, StateFilter
 from aiogram.types import CallbackQuery, Message
 
 from bot.keyboards import (
@@ -131,6 +131,7 @@ async def check_subscription_handler(callback: CallbackQuery) -> None:
 
 
 @router.message(
+    ~StateFilter(PostCreationStates.waiting_for_content),
     F.text
     & ~F.text.startswith("/")
     & ~F.text.in_({SCHEDULE_BUTTON, FAQ_BUTTON, CONTACTS_BUTTON, PHOTO_BUTTON})
@@ -139,8 +140,13 @@ async def confirmed_user_fallback(message: Message, state: FSMContext) -> None:
     if message.from_user is None:
         return
     current_state = await state.get_state()
-    if current_state == PostCreationStates.waiting_for_content.state:
-        return
+    admin_id = message.from_user.id if message.from_user else None
+    logger.info(
+        "GENERIC_TEXT_HANDLER hit state=%s admin_id=%s text_prefix=%r",
+        current_state,
+        admin_id,
+        (message.text or "")[:30],
+    )
     editing_service = PageEditingService(
         session_maker=message.bot.session_maker,
         user_repository=UserRepository(),
