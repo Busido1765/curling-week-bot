@@ -1,3 +1,5 @@
+import logging
+
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import Message, ReplyKeyboardMarkup
@@ -25,6 +27,7 @@ from bot.storage import PageRepository
 from bot.storage import UserRepository
 
 router = Router()
+logger = logging.getLogger(__name__)
 
 
 async def _get_confirmed_menu(message: Message) -> ReplyKeyboardMarkup | None:
@@ -47,17 +50,22 @@ def _is_admin(message: Message) -> bool:
 
 
 async def _send_page(message: Message, key: str) -> None:
+    user_id = message.from_user.id if message.from_user else None
+    is_admin = _is_admin(message)
+    logger.info("PAGE_VIEW_HANDLER hit page=%s user_id=%s is_admin=%s", key, user_id, is_admin)
+
     service = PageService(
         session_maker=message.bot.session_maker,
         page_repository=PageRepository(),
     )
     render = await service.render_page(key)
     reply_markup = None
-    if _is_admin(message):
+    if is_admin:
         reply_markup = page_edit_keyboard(key)
     else:
         reply_markup = await _get_confirmed_menu(message)
     if render.content_type == "photo" and render.file_id:
+        logger.info("PAGE_VIEW_HANDLER content_length=%s", len(render.caption or ""))
         await message.answer_photo(
             render.file_id,
             caption=render.caption,
@@ -66,6 +74,7 @@ async def _send_page(message: Message, key: str) -> None:
         )
         return
     if render.content_type == "document" and render.file_id:
+        logger.info("PAGE_VIEW_HANDLER content_length=%s", len(render.caption or ""))
         await message.answer_document(
             render.file_id,
             caption=render.caption,
@@ -74,6 +83,7 @@ async def _send_page(message: Message, key: str) -> None:
         )
         return
     content = render.text or DEFAULT_PAGE_MESSAGE
+    logger.info("PAGE_VIEW_HANDLER content_length=%s", len(content))
     await message.answer(content, reply_markup=reply_markup, entities=render.entities)
 
 

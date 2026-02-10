@@ -8,7 +8,14 @@ from aiogram.types import CallbackQuery, Message
 
 from bot.filters import Command
 
-from bot.keyboards.page_edit import EDIT_PAGE_CALLBACK_PREFIX, page_edit_keyboard
+from bot.keyboards.page_edit import (
+    EDIT_PAGE_CALLBACK_PREFIX,
+    PAGE_DRAFT_CANCEL_CALLBACK,
+    PAGE_DRAFT_SAVE_CALLBACK,
+    page_draft_cancel_keyboard,
+    page_draft_confirm_keyboard,
+    page_edit_keyboard,
+)
 from bot.keyboards.post_confirm import (
     POST_CANCEL_CALLBACK,
     POST_CLEAR_CALLBACK,
@@ -37,6 +44,10 @@ logger = logging.getLogger(__name__)
 
 
 class PostCreationStates(StatesGroup):
+    waiting_for_content = State()
+
+
+class PageEditingStates(StatesGroup):
     waiting_for_content = State()
 
 
@@ -88,8 +99,37 @@ async def _send_page_with_edit_button(message: Message, key: str) -> None:
     await message.answer(content, reply_markup=reply_markup, entities=render.entities)
 
 
+async def _start_page_editing(message: Message, state: FSMContext, page_key: str) -> None:
+    if not _is_admin(message) or message.from_user is None:
+        await message.answer("Недостаточно прав")
+        return
+    if page_key not in PAGE_KEYS:
+        await message.answer("Недоступная страница")
+        return
+
+    service = PageEditingService(
+        session_maker=message.bot.session_maker,
+        user_repository=UserRepository(),
+    )
+    await service.start_editing(
+        tg_id=message.from_user.id,
+        username=message.from_user.username,
+        key=page_key,
+    )
+    await state.set_state(PageEditingStates.waiting_for_content)
+    await state.update_data(page_draft={"key": page_key})
+    await message.answer(
+        f"Редактирование страницы {page_key}. Пришли текст, фото или документ.\n"
+        "После каждого обновления я автоматически покажу превью.\n"
+        "Чтобы выйти без сохранения, нажми «❌ Отмена».",
+        reply_markup=page_draft_cancel_keyboard(),
+    )
+
+
+
+
 @router.callback_query(F.data.startswith(EDIT_PAGE_CALLBACK_PREFIX))
-async def edit_page_callback(callback: CallbackQuery) -> None:
+async def edit_page_callback(callback: CallbackQuery, state: FSMContext) -> None:
     if not _is_admin_callback(callback):
         await callback.answer("Недостаточно прав")
         return
@@ -98,20 +138,30 @@ async def edit_page_callback(callback: CallbackQuery) -> None:
     if page_key not in PAGE_KEYS:
         await callback.answer("Недоступная страница")
         return
-    service = PageEditingService(
-        session_maker=callback.bot.session_maker,
-        user_repository=UserRepository(),
-    )
-    await service.start_editing(
-        tg_id=callback.from_user.id,
-        username=callback.from_user.username,
-        key=page_key,
-    )
+
     await callback.answer()
     if callback.message:
-        await callback.message.answer(
-            f"Пришли новый текст, фото или документ для {page_key}. Для отмены: /cancel"
-        )
+        await _start_page_editing(callback.message, state, page_key)
+
+
+@router.message(Command("edit_faq"))
+async def edit_faq_command(message: Message, state: FSMContext) -> None:
+    await _start_page_editing(message, state, PAGE_KEY_FAQ)
+
+
+@router.message(Command("edit_contacts"))
+async def edit_contacts_command(message: Message, state: FSMContext) -> None:
+    await _start_page_editing(message, state, PAGE_KEY_CONTACTS)
+
+
+@router.message(Command("edit_schedule"))
+async def edit_schedule_command(message: Message, state: FSMContext) -> None:
+    await _start_page_editing(message, state, PAGE_KEY_SCHEDULE)
+
+
+@router.message(Command("edit_photo"))
+async def edit_photo_command(message: Message, state: FSMContext) -> None:
+    await _start_page_editing(message, state, PAGE_KEY_PHOTO)
 
 
 @router.message(Command("post"))
@@ -332,10 +382,44 @@ async def send_post_callback(callback: CallbackQuery, state: FSMContext) -> None
         )
 
 
-@router.message((F.text & ~F.text.startswith("/")) | F.photo | F.document)
-async def handle_page_editing(message: Message) -> None:
-    if not _is_admin(message):
+async def _send_page_draft_preview(message: Message, page_key: str, draft: dict) -> None:
+    reply_markup = page_edit_keyboard(page_key)
+    content_type = draft.get("content_type", "text")
+
+    if content_type == "photo" and draft.get("file_id"):
+        await message.answer_photo(
+            draft["file_id"],
+            caption=draft.get("caption") or "",
+            caption_entities=draft.get("caption_entities"),
+            reply_markup=reply_markup,
+        )
         return
+
+    if content_type == "document" and draft.get("file_id"):
+        await message.answer_document(
+            draft["file_id"],
+            caption=draft.get("caption") or "",
+            caption_entities=draft.get("caption_entities"),
+            reply_markup=reply_markup,
+        )
+        return
+
+    text = (draft.get("text") or "").strip()
+    await message.answer(
+        text or DEFAULT_PAGE_MESSAGE,
+        entities=draft.get("entities"),
+        reply_markup=reply_markup,
+    )
+
+
+@router.message(
+    StateFilter(PageEditingStates.waiting_for_content),
+    (F.text & ~F.text.startswith("/")) | F.photo | F.document,
+)
+async def handle_page_editing(message: Message, state: FSMContext) -> None:
+    if not _is_admin(message) or message.from_user is None:
+        return
+
     service = PageEditingService(
         session_maker=message.bot.session_maker,
         user_repository=UserRepository(),
@@ -343,50 +427,119 @@ async def handle_page_editing(message: Message) -> None:
     editing_key = await service.get_editing_key(message.from_user.id)
     if editing_key is None:
         return
-    page_service = PageService(
-        session_maker=message.bot.session_maker,
-        page_repository=PageRepository(),
-    )
+
+    data = await state.get_data()
+    draft = dict(data.get("page_draft") or {})
+    draft["key"] = editing_key
+
     if message.photo:
-        file_id = message.photo[-1].file_id
-        await page_service.update_page_photo(
-            editing_key,
-            file_id=file_id,
-            caption=message.caption,
-            caption_entities=serialize_entities(message.caption_entities),
+        draft.update(
+            {
+                "content_type": "photo",
+                "file_id": message.photo[-1].file_id,
+                "caption": message.caption or "",
+                "caption_entities": message.caption_entities,
+            }
         )
     elif message.document:
-        await page_service.update_page_document(
-            editing_key,
-            file_id=message.document.file_id,
-            caption=message.caption,
-            caption_entities=serialize_entities(message.caption_entities),
+        draft.update(
+            {
+                "content_type": "document",
+                "file_id": message.document.file_id,
+                "caption": message.caption or "",
+                "caption_entities": message.caption_entities,
+            }
         )
     elif message.text:
-        await page_service.update_page_text(
-            editing_key,
-            text=message.text,
-            entities=serialize_entities(message.entities),
+        draft.update(
+            {
+                "content_type": "text",
+                "text": message.text,
+                "entities": message.entities,
+            }
         )
     else:
         await message.answer("Пока поддерживаются: текст, фото, документ.")
         return
-    await service.cancel_editing(message.from_user.id)
-    await message.answer("Сохранено ✅")
-    await _send_page_with_edit_button(message, editing_key)
+
+    await state.update_data(page_draft=draft)
+    await _send_page_draft_preview(message, editing_key, draft)
+    await message.answer("Черновик обновлён.", reply_markup=page_draft_confirm_keyboard())
 
 
-@router.message(~Command())
+@router.message(StateFilter(PageEditingStates.waiting_for_content))
 async def handle_page_editing_unsupported(message: Message) -> None:
     if not _is_admin(message):
         return
+    await message.answer("Пока поддерживаются: текст, фото, документ.")
+
+
+@router.callback_query(F.data == PAGE_DRAFT_SAVE_CALLBACK)
+async def save_page_draft_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    if not _is_admin_callback(callback) or callback.from_user is None:
+        await callback.answer("Недостаточно прав")
+        return
+
     service = PageEditingService(
-        session_maker=message.bot.session_maker,
+        session_maker=callback.bot.session_maker,
         user_repository=UserRepository(),
     )
-    editing_key = await service.get_editing_key(message.from_user.id)
+    editing_key = await service.get_editing_key(callback.from_user.id)
     if editing_key is None:
+        await callback.answer("Черновик не найден", show_alert=True)
         return
-    if message.text or message.photo or message.document:
+
+    data = await state.get_data()
+    draft = dict(data.get("page_draft") or {})
+    if not draft:
+        await callback.answer("Черновик пуст", show_alert=True)
         return
-    await message.answer("Пока поддерживаются: текст, фото, документ.")
+
+    page_service = PageService(
+        session_maker=callback.bot.session_maker,
+        page_repository=PageRepository(),
+    )
+    content_type = draft.get("content_type")
+    if content_type == "photo" and draft.get("file_id"):
+        await page_service.update_page_photo(
+            editing_key,
+            file_id=draft["file_id"],
+            caption=draft.get("caption"),
+            caption_entities=serialize_entities(draft.get("caption_entities")),
+        )
+    elif content_type == "document" and draft.get("file_id"):
+        await page_service.update_page_document(
+            editing_key,
+            file_id=draft["file_id"],
+            caption=draft.get("caption"),
+            caption_entities=serialize_entities(draft.get("caption_entities")),
+        )
+    else:
+        await page_service.update_page_text(
+            editing_key,
+            text=draft.get("text") or "",
+            entities=serialize_entities(draft.get("entities")),
+        )
+
+    await service.cancel_editing(callback.from_user.id)
+    await state.clear()
+    await callback.answer()
+    if callback.message:
+        await callback.message.answer("✅ Сохранено.")
+
+
+@router.callback_query(F.data == PAGE_DRAFT_CANCEL_CALLBACK)
+async def cancel_page_draft_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    if not _is_admin_callback(callback) or callback.from_user is None:
+        await callback.answer("Недостаточно прав")
+        return
+
+    service = PageEditingService(
+        session_maker=callback.bot.session_maker,
+        user_repository=UserRepository(),
+    )
+    await service.cancel_editing(callback.from_user.id)
+    await state.clear()
+    await callback.answer()
+    if callback.message:
+        await callback.message.answer("Отменено")
