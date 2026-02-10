@@ -432,9 +432,49 @@ async def _send_page_draft_preview(message: Message, page_key: str, draft: dict)
 
 @router.message(
     StateFilter(PageEditingStates.waiting_for_content),
-    (F.text & ~F.text.startswith("/")) | F.photo | F.document,
+    F.text & ~F.text.startswith("/"),
 )
-async def handle_page_editing(message: Message, state: FSMContext) -> None:
+async def handle_page_editing_text(message: Message, state: FSMContext) -> None:
+    if not _is_admin(message) or message.from_user is None:
+        return
+
+    current_state = await state.get_state()
+    logger.info(
+        "PAGE_TEXT_HANDLER hit state=%s user_id=%s prefix=%r",
+        current_state,
+        message.from_user.id,
+        (message.text or "")[:30],
+    )
+
+    service = PageEditingService(
+        session_maker=message.bot.session_maker,
+        user_repository=UserRepository(),
+    )
+    editing_key = await service.get_editing_key(message.from_user.id)
+    if editing_key is None:
+        return
+
+    data = await state.get_data()
+    draft = dict(data.get("page_draft") or {})
+    draft.update(
+        {
+            "key": editing_key,
+            "content_type": "text",
+            "text": message.text,
+            "entities": message.entities,
+        }
+    )
+
+    await state.update_data(page_draft=draft)
+    await _send_page_draft_preview(message, editing_key, draft)
+    await message.answer("Черновик обновлён.", reply_markup=page_draft_confirm_keyboard())
+
+
+@router.message(
+    StateFilter(PageEditingStates.waiting_for_content),
+    F.photo | F.document,
+)
+async def handle_page_editing_media(message: Message, state: FSMContext) -> None:
     if not _is_admin(message) or message.from_user is None:
         return
 
@@ -468,17 +508,6 @@ async def handle_page_editing(message: Message, state: FSMContext) -> None:
                 "caption_entities": message.caption_entities,
             }
         )
-    elif message.text:
-        draft.update(
-            {
-                "content_type": "text",
-                "text": message.text,
-                "entities": message.entities,
-            }
-        )
-    else:
-        await message.answer("Пока поддерживаются: текст, фото, документ.")
-        return
 
     await state.update_data(page_draft=draft)
     await _send_page_draft_preview(message, editing_key, draft)

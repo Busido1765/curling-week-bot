@@ -28,7 +28,7 @@ from bot.services.token_verifier import get_token_verifier
 from bot.services.user_status import UserStatusService
 from bot.services.page_editing import PageEditingService
 from bot.storage import UserRepository
-from bot.handlers.admin import PostCreationStates
+from bot.handlers.admin import PageEditingStates, PostCreationStates
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -132,6 +132,7 @@ async def check_subscription_handler(callback: CallbackQuery) -> None:
 
 @router.message(
     ~StateFilter(PostCreationStates.waiting_for_content),
+    ~StateFilter(PageEditingStates.waiting_for_content),
     F.text
     & ~F.text.startswith("/")
     & ~F.text.in_({SCHEDULE_BUTTON, FAQ_BUTTON, CONTACTS_BUTTON, PHOTO_BUTTON})
