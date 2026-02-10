@@ -33,7 +33,7 @@ from bot.services.pages import (
     PAGE_KEY_SCHEDULE,
     PageService,
 )
-from bot.services.post_service import PostService, UnsupportedPostContentError
+from bot.services.post_service import DraftApplyResult, PostService, UnsupportedPostContentError
 from bot.storage import PageRepository, PostRepository, UserRepository
 from bot.utils import serialize_entities, should_notify_album, should_notify_document_update
 from bot.utils.admin import is_admin_event
@@ -306,14 +306,17 @@ async def _handle_post_content(message: Message) -> None:
         )
         return
 
-    is_document_update = bool(message.document)
-    if is_document_update and not result.notice:
-        return
+    await _send_post_draft_feedback(message=message, service=service, result=result)
 
+
+async def _send_post_draft_feedback(
+    message: Message,
+    service: PostService,
+    result: DraftApplyResult,
+) -> None:
     await service.send_preview(message.bot, message.chat.id, result.post)
     if result.notice:
         await message.answer(result.notice)
-        return
     await message.answer("Черновик обновлён.", reply_markup=post_confirm_keyboard())
 
 
