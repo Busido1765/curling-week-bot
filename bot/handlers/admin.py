@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 
 from aiogram import F, Router
 from aiogram.filters import StateFilter
@@ -11,9 +12,11 @@ from bot.filters import Command
 from bot.keyboards.page_edit import (
     EDIT_PAGE_CALLBACK_PREFIX,
     PAGE_DRAFT_CANCEL_CALLBACK,
+    PAGE_DRAFT_DELETE_DOC_CALLBACK,
     PAGE_DRAFT_SAVE_CALLBACK,
     page_confirm_keyboard,
     page_draft_cancel_keyboard,
+    page_draft_delete_document_keyboard,
     page_edit_keyboard,
 )
 from bot.keyboards.post_confirm import (
@@ -502,6 +505,7 @@ async def _send_page_draft_preview(message: Message, page_key: str, draft: dict)
             draft["extra_document_file_id"],
             caption=draft.get("extra_document_caption") or "",
             caption_entities=draft.get("extra_document_caption_entities"),
+            reply_markup=page_draft_delete_document_keyboard(),
         )
 
 
@@ -646,6 +650,47 @@ async def _restore_page_from_draft(bot, page_key: str, draft: dict) -> None:
 
 
 
+
+async def _clear_page_extra_document(bot, page_key: str) -> None:
+    page_repository = PageRepository()
+    async with bot.session_maker() as session:
+        async with session.begin():
+            page = await page_repository.get_by_key(session, page_key)
+            if page is None:
+                return
+            page.extra_document_file_id = None
+            page.extra_document_caption = None
+            page.extra_document_caption_entities = None
+            page.updated_at = datetime.utcnow()
+            session.add(page)
+
+@router.callback_query(
+    StateFilter(PageEditingStates.waiting_for_content),
+    F.data == PAGE_DRAFT_DELETE_DOC_CALLBACK,
+)
+async def delete_page_draft_document_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    if not _is_admin(callback) or callback.from_user is None:
+        await callback.answer("Недостаточно прав")
+        return
+
+    data = await state.get_data()
+    draft = dict(data.get("page_draft") or {})
+    page_key = draft.get("key")
+    if not page_key:
+        await callback.answer()
+        return
+
+    draft["extra_document_file_id"] = None
+    draft["extra_document_caption"] = None
+    draft["extra_document_caption_entities"] = None
+
+    await state.update_data(page_draft=draft)
+    await _clear_page_extra_document(callback.bot, page_key)
+    await callback.answer()
+    if callback.message:
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.answer("Файл удалён из страницы.")
+        await callback.message.answer("Черновик обновлён.", reply_markup=page_confirm_keyboard())
 
 @router.callback_query(F.data == PAGE_DRAFT_SAVE_CALLBACK)
 async def save_page_draft_callback(callback: CallbackQuery, state: FSMContext) -> None:
