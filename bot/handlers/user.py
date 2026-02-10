@@ -82,12 +82,12 @@ async def start_handler(message: Message) -> None:
             reply_markup=reply_markup,
         )
         await message.answer(
-            "После подписки вернись сюда и подтверди подписку:",
+            "После подписки вернись в бота и подтверди подписку:",
             reply_markup=subscription_check_keyboard(),
         )
         return
 
-    await message.answer("Токен неверный/просрочен")
+    await message.answer("Ошибка доступа")
 
 
 @router.callback_query(F.data == CHECK_SUBSCRIPTION_CALLBACK)
@@ -127,7 +127,7 @@ async def check_subscription_handler(callback: CallbackQuery) -> None:
         return
 
     await callback.message.answer(
-        "Ты не подписан на канал. Подпишись и нажми кнопку ещё раз."
+        "Ты не подписан на нужный канал. Подпишись и нажми кнопку ещё раз."
     )
 
 
