@@ -11,9 +11,7 @@ from bot.filters import Command
 from bot.keyboards.page_edit import (
     EDIT_PAGE_CALLBACK_PREFIX,
     PAGE_DRAFT_CANCEL_CALLBACK,
-    PAGE_DRAFT_SAVE_CALLBACK,
     page_draft_cancel_keyboard,
-    page_draft_confirm_keyboard,
     page_edit_keyboard,
 )
 from bot.keyboards.post_confirm import (
@@ -187,7 +185,7 @@ async def _start_page_editing(
         )
 
     await state.set_state(PageEditingStates.waiting_for_content)
-    await state.update_data(page_draft=draft)
+    await state.update_data(page_draft=draft, page_original_draft=dict(draft))
     await message.answer(
         f"Редактирование страницы {page_key}. Пришли текст, фото или документ.\n"
         "После каждого обновления я автоматически покажу превью.\n"
@@ -538,8 +536,9 @@ async def handle_page_editing_text(message: Message, state: FSMContext) -> None:
     )
 
     await state.update_data(page_draft=draft)
+    await _restore_page_from_draft(message.bot, editing_key, draft)
     await _send_page_draft_preview(message, editing_key, draft)
-    await message.answer("Черновик обновлён.", reply_markup=page_draft_confirm_keyboard())
+    await message.answer("Черновик обновлён.", reply_markup=page_draft_cancel_keyboard())
 
 
 @router.message(
@@ -566,7 +565,7 @@ async def handle_page_editing_media(message: Message, state: FSMContext) -> None
         if _should_send_album_warning(message):
             await message.answer(
                 "Альбомы не поддерживаются. Пришли одно фото/видео/гиф одним сообщением.",
-                reply_markup=page_draft_confirm_keyboard(),
+                reply_markup=page_draft_cancel_keyboard(),
             )
         return
 
@@ -591,6 +590,7 @@ async def handle_page_editing_media(message: Message, state: FSMContext) -> None
         should_respond = _is_document_notice_allowed(message)
 
     await state.update_data(page_draft=draft)
+    await _restore_page_from_draft(message.bot, editing_key, draft)
     if not should_respond:
         return
 
@@ -598,10 +598,10 @@ async def handle_page_editing_media(message: Message, state: FSMContext) -> None
     if message.document:
         await message.answer(
             "Файл заменён. Он будет отправлен отдельным сообщением.",
-            reply_markup=page_draft_confirm_keyboard(),
+            reply_markup=page_draft_cancel_keyboard(),
         )
         return
-    await message.answer("Черновик обновлён.", reply_markup=page_draft_confirm_keyboard())
+    await message.answer("Черновик обновлён.", reply_markup=page_draft_cancel_keyboard())
 
 
 @router.message(StateFilter(PageEditingStates.waiting_for_content))
@@ -612,64 +612,40 @@ async def handle_page_editing_unsupported(message: Message) -> None:
         if _should_send_album_warning(message):
             await message.answer(
                 "Альбомы не поддерживаются. Пришли одно фото/видео/гиф одним сообщением.",
-                reply_markup=page_draft_confirm_keyboard(),
+                reply_markup=page_draft_cancel_keyboard(),
             )
         return
     await message.answer("Пока поддерживаются: текст, фото, документ.")
 
 
-@router.callback_query(F.data == PAGE_DRAFT_SAVE_CALLBACK)
-async def save_page_draft_callback(callback: CallbackQuery, state: FSMContext) -> None:
-    if not _is_admin(callback) or callback.from_user is None:
-        await callback.answer("Недостаточно прав")
-        return
-
-    service = PageEditingService(
-        session_maker=callback.bot.session_maker,
-        user_repository=UserRepository(),
-    )
-    editing_key = await service.get_editing_key(callback.from_user.id)
-    if editing_key is None:
-        await callback.answer("Черновик не найден", show_alert=True)
-        return
-
-    data = await state.get_data()
-    draft = dict(data.get("page_draft") or {})
-    if not draft:
-        await callback.answer("Черновик пуст", show_alert=True)
-        return
-
+async def _restore_page_from_draft(bot, page_key: str, draft: dict) -> None:
     page_service = PageService(
-        session_maker=callback.bot.session_maker,
+        session_maker=bot.session_maker,
         page_repository=PageRepository(),
     )
     if draft.get("main_content_type") == "photo" and draft.get("main_photo_file_id"):
         await page_service.update_page_photo(
-            editing_key,
+            page_key,
             file_id=draft["main_photo_file_id"],
             caption=draft.get("main_photo_caption"),
             caption_entities=serialize_entities(draft.get("main_photo_caption_entities")),
         )
     else:
         await page_service.update_page_text(
-            editing_key,
+            page_key,
             text=draft.get("main_text") or "",
             entities=serialize_entities(draft.get("main_entities")),
         )
 
     if draft.get("extra_document_file_id"):
         await page_service.update_page_document(
-            editing_key,
+            page_key,
             file_id=draft["extra_document_file_id"],
             caption=draft.get("extra_document_caption"),
             caption_entities=serialize_entities(draft.get("extra_document_caption_entities")),
         )
 
-    await service.cancel_editing(callback.from_user.id)
-    await state.clear()
-    await callback.answer()
-    if callback.message:
-        await callback.message.answer("✅ Сохранено.")
+
 
 
 @router.callback_query(F.data == PAGE_DRAFT_CANCEL_CALLBACK)
@@ -682,6 +658,12 @@ async def cancel_page_draft_callback(callback: CallbackQuery, state: FSMContext)
         session_maker=callback.bot.session_maker,
         user_repository=UserRepository(),
     )
+    editing_key = await service.get_editing_key(callback.from_user.id)
+    data = await state.get_data()
+    original_draft = dict(data.get("page_original_draft") or {})
+    if editing_key and original_draft:
+        await _restore_page_from_draft(callback.bot, editing_key, original_draft)
+
     await service.cancel_editing(callback.from_user.id)
     await state.clear()
     await callback.answer()
