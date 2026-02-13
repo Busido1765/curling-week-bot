@@ -150,8 +150,8 @@ async def check_subscription_handler(callback: CallbackQuery) -> None:
 
             Оставайся с нами — будет движ и кёрлинг ❤️""",
             reply_markup=reply_markup
-            )
-            return
+        )
+        return
 
     await callback.message.answer(
         "Ты не подписан на нужный канал. Подпишись и нажми кнопку ещё раз."
