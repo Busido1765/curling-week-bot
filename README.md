@@ -46,13 +46,13 @@ docker compose up --build
 
 Список обязательных переменных см. в `.env.example`.
 
-## Аутентификация по токену сайта (JWT HS256)
+## Аутентификация по токену сайта (JWT RS256)
 
 Бот ожидает, что сайт передаёт токен в deep-link Telegram:
 
 - Формат ссылки: `https://t.me/<bot_username>?start=<jwt_token>`
-- Алгоритм подписи: `HS256`
-- Секрет: `JWT_SECRET` из `.env`
+- Алгоритм подписи: `RS256`
+- Публичный ключ: `JWT_PUBLIC_KEY` из `.env` (PEM, допускается формат с `\n`)
 
 ### Минимальная модель данных payload (JSON)
 
@@ -77,7 +77,7 @@ docker compose up --build
 - отсутствует хотя бы один из обязательных клеймов (`sub`, `iat`, `exp`, `aud`),
 - `exp` уже истёк,
 - `aud` не совпадает,
-- подпись не проходит проверку `HS256` + `JWT_SECRET`.
+- подпись не проходит проверку `RS256` по `JWT_PUBLIC_KEY`.
 
 ### Поведение администратора (вход без токена)
 
@@ -91,7 +91,7 @@ docker compose up --build
 ```env
 BOT_TOKEN=replace_with_bot_token
 DATABASE_URL=postgresql+asyncpg://curling_user:curling_password@postgres:5432/curling_db
-JWT_SECRET=replace_with_strong_secret
+JWT_PUBLIC_KEY="-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtestkeyreplace\n-----END PUBLIC KEY-----"
 ADMIN_IDS=123456789,987654321
 REQUIRED_CHANNELS=[{"id":-1001234567890,"title":"Новости","url":"https://t.me/channel1"}]
 ```

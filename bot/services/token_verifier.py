@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import base64
-import hashlib
-import hmac
 import json
 import logging
+import subprocess
+import tempfile
 import time
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -15,12 +16,17 @@ class TokenVerifier:
         raise NotImplementedError
 
 
-class JwtHs256TokenVerifier(TokenVerifier):
-    def __init__(self, secret: str, audience: str = "curling-week-bot") -> None:
-        self._secret = secret.encode("utf-8")
+class JwtRs256TokenVerifier(TokenVerifier):
+    def __init__(self, public_key_pem: str, audience: str = "curling-week-bot") -> None:
+        normalized = public_key_pem.replace("\\n", "\n").strip()
+        self._public_key_pem = normalized
         self._audience = audience
 
     def is_valid(self, token: str) -> bool:
+        if not self._public_key_pem:
+            logger.warning("JWT public key is empty")
+            return False
+
         try:
             header_b64, payload_b64, signature_b64 = token.split(".")
         except ValueError:
@@ -29,20 +35,15 @@ class JwtHs256TokenVerifier(TokenVerifier):
         try:
             header = self._decode_json(header_b64)
             payload = self._decode_json(payload_b64)
+            signature = self._b64url_decode(signature_b64)
         except (json.JSONDecodeError, ValueError):
             return False
 
-        if header.get("alg") != "HS256":
+        if header.get("alg") != "RS256":
             return False
 
         signing_input = f"{header_b64}.{payload_b64}".encode("utf-8")
-        expected_signature = hmac.new(
-            self._secret,
-            signing_input,
-            hashlib.sha256,
-        ).digest()
-        actual_signature = self._b64url_decode(signature_b64)
-        if not hmac.compare_digest(expected_signature, actual_signature):
+        if not self._verify_signature(signing_input, signature):
             return False
 
         if not self._has_required_claims(payload):
@@ -67,13 +68,40 @@ class JwtHs256TokenVerifier(TokenVerifier):
             return self._audience in aud
         return False
 
+    def _verify_signature(self, signing_input: bytes, signature: bytes) -> bool:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            data_path = tmp_path / "jwt_data.bin"
+            signature_path = tmp_path / "jwt_signature.bin"
+            key_path = tmp_path / "jwt_public_key.pem"
+
+            data_path.write_bytes(signing_input)
+            signature_path.write_bytes(signature)
+            key_path.write_text(self._public_key_pem)
+
+            result = subprocess.run(
+                [
+                    "openssl",
+                    "dgst",
+                    "-sha256",
+                    "-verify",
+                    str(key_path),
+                    "-signature",
+                    str(signature_path),
+                    str(data_path),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            return result.returncode == 0
+
     @staticmethod
     def _has_required_claims(payload: dict[str, object]) -> bool:
         return all(key in payload for key in ("sub", "exp", "iat", "aud"))
 
     @staticmethod
     def _decode_json(data: str) -> dict[str, object]:
-        decoded = JwtHs256TokenVerifier._b64url_decode(data)
+        decoded = JwtRs256TokenVerifier._b64url_decode(data)
         as_json = json.loads(decoded.decode("utf-8"))
         if not isinstance(as_json, dict):
             raise ValueError("JWT part is not JSON object")
@@ -85,5 +113,5 @@ class JwtHs256TokenVerifier(TokenVerifier):
         return base64.urlsafe_b64decode(data + padding)
 
 
-def get_token_verifier(jwt_secret: str) -> TokenVerifier:
-    return JwtHs256TokenVerifier(secret=jwt_secret)
+def get_token_verifier(jwt_public_key: str) -> TokenVerifier:
+    return JwtRs256TokenVerifier(public_key_pem=jwt_public_key)

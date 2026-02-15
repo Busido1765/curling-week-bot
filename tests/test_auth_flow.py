@@ -1,18 +1,27 @@
 import base64
-import hashlib
-import hmac
 import json
+import subprocess
+import tempfile
 import time
 import unittest
+from pathlib import Path
 
 import sys
-from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from bot.models import RegistrationStatus
 from bot.services.registration import RegistrationService
 from bot.services.token_verifier import get_token_verifier
+
+
+def b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def b64url_decode(data: str) -> bytes:
+    padding = "=" * (-len(data) % 4)
+    return base64.urlsafe_b64decode(data + padding)
 
 
 class FakeUser:
@@ -57,60 +66,158 @@ class FakeSessionMaker:
         return _Ctx()
 
 
-def b64url(data: bytes) -> str:
-    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+class RsaTokenFactory:
+    def __init__(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self._tmp_path = Path(self._tmp.name)
+        self.private_key_path = self._tmp_path / "private.pem"
+        self.public_key_path = self._tmp_path / "public.pem"
 
+        subprocess.run(
+            [
+                "openssl",
+                "genpkey",
+                "-algorithm",
+                "RSA",
+                "-pkeyopt",
+                "rsa_keygen_bits:2048",
+                "-out",
+                str(self.private_key_path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            [
+                "openssl",
+                "rsa",
+                "-pubout",
+                "-in",
+                str(self.private_key_path),
+                "-out",
+                str(self.public_key_path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
 
-def make_token(secret: str, payload: dict[str, object] | None = None) -> str:
-    now = int(time.time())
-    header = {"alg": "HS256", "typ": "JWT"}
-    default_payload = {
-        "sub": "site-user-1",
-        "iat": now,
-        "exp": now + 300,
-        "aud": "curling-week-bot",
-    }
-    if payload:
-        default_payload.update(payload)
+    def close(self) -> None:
+        self._tmp.cleanup()
 
-    encoded_header = b64url(json.dumps(header, separators=(",", ":")).encode("utf-8"))
-    encoded_payload = b64url(json.dumps(default_payload, separators=(",", ":")).encode("utf-8"))
-    signing_input = f"{encoded_header}.{encoded_payload}".encode("utf-8")
-    signature = hmac.new(secret.encode("utf-8"), signing_input, hashlib.sha256).digest()
-    encoded_signature = b64url(signature)
-    return f"{encoded_header}.{encoded_payload}.{encoded_signature}"
+    def public_key_pem(self) -> str:
+        return self.public_key_path.read_text()
+
+    def make_token(self, payload: dict[str, object] | None = None, alg: str = "RS256") -> str:
+        now = int(time.time())
+        header = {"alg": alg, "typ": "JWT"}
+        body = {
+            "sub": "site-user-1",
+            "iat": now,
+            "exp": now + 300,
+            "aud": "curling-week-bot",
+        }
+        if payload:
+            body.update(payload)
+
+        encoded_header = b64url(json.dumps(header, separators=(",", ":")).encode("utf-8"))
+        encoded_payload = b64url(json.dumps(body, separators=(",", ":")).encode("utf-8"))
+        signing_input = f"{encoded_header}.{encoded_payload}".encode("utf-8")
+
+        data_path = self._tmp_path / "jwt_data.bin"
+        sig_path = self._tmp_path / "jwt_sig.bin"
+        data_path.write_bytes(signing_input)
+
+        subprocess.run(
+            [
+                "openssl",
+                "dgst",
+                "-sha256",
+                "-sign",
+                str(self.private_key_path),
+                "-out",
+                str(sig_path),
+                str(data_path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        encoded_signature = b64url(sig_path.read_bytes())
+        return f"{encoded_header}.{encoded_payload}.{encoded_signature}"
 
 
 class TestJwtTokenVerifier(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.factory = RsaTokenFactory()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.factory.close()
+
     def test_valid_token(self) -> None:
-        verifier = get_token_verifier("secret")
-        token = make_token("secret")
+        verifier = get_token_verifier(self.factory.public_key_pem())
+        token = self.factory.make_token()
         self.assertTrue(verifier.is_valid(token))
 
     def test_invalid_audience(self) -> None:
-        verifier = get_token_verifier("secret")
-        token = make_token("secret", payload={"aud": "other-service"})
+        verifier = get_token_verifier(self.factory.public_key_pem())
+        token = self.factory.make_token(payload={"aud": "other-service"})
         self.assertFalse(verifier.is_valid(token))
 
     def test_missing_required_claim(self) -> None:
-        verifier = get_token_verifier("secret")
-        token = make_token("secret")
-        parts = token.split(".")
-        payload = json.loads(base64.urlsafe_b64decode(parts[1] + "==").decode("utf-8"))
+        verifier = get_token_verifier(self.factory.public_key_pem())
+        token = self.factory.make_token()
+        header_b64, payload_b64, _ = token.split(".")
+        payload = json.loads(b64url_decode(payload_b64).decode("utf-8"))
         payload.pop("aud", None)
-        tampered_payload = b64url(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
-        signing_input = f"{parts[0]}.{tampered_payload}".encode("utf-8")
-        signature = b64url(hmac.new(b"secret", signing_input, hashlib.sha256).digest())
-        bad_token = f"{parts[0]}.{tampered_payload}.{signature}"
+
+        tampered_payload_b64 = b64url(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+        signing_input = f"{header_b64}.{tampered_payload_b64}".encode("utf-8")
+
+        data_path = self.factory._tmp_path / "tampered_data.bin"
+        sig_path = self.factory._tmp_path / "tampered_sig.bin"
+        data_path.write_bytes(signing_input)
+        subprocess.run(
+            [
+                "openssl",
+                "dgst",
+                "-sha256",
+                "-sign",
+                str(self.factory.private_key_path),
+                "-out",
+                str(sig_path),
+                str(data_path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        bad_token = f"{header_b64}.{tampered_payload_b64}.{b64url(sig_path.read_bytes())}"
         self.assertFalse(verifier.is_valid(bad_token))
+
+    def test_rejects_non_rs256_header(self) -> None:
+        verifier = get_token_verifier(self.factory.public_key_pem())
+        token = self.factory.make_token(alg="HS256")
+        self.assertFalse(verifier.is_valid(token))
 
 
 class TestRegistrationAdminBypass(unittest.IsolatedAsyncioTestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.factory = RsaTokenFactory()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.factory.close()
+
     async def test_non_admin_without_token_is_rejected(self) -> None:
         service = RegistrationService(
             session_maker=FakeSessionMaker(),
             user_repository=FakeUserRepository(),
-            token_verifier=get_token_verifier("secret"),
+            token_verifier=get_token_verifier(self.factory.public_key_pem()),
             admin_ids=[42],
         )
         result = await service.handle_start(tg_id=100, username="user", token=None)
@@ -122,7 +229,7 @@ class TestRegistrationAdminBypass(unittest.IsolatedAsyncioTestCase):
         service = RegistrationService(
             session_maker=FakeSessionMaker(),
             user_repository=FakeUserRepository(),
-            token_verifier=get_token_verifier("secret"),
+            token_verifier=get_token_verifier(self.factory.public_key_pem()),
             admin_ids=[42],
         )
         result = await service.handle_start(tg_id=42, username="admin", token=None)
@@ -134,10 +241,10 @@ class TestRegistrationAdminBypass(unittest.IsolatedAsyncioTestCase):
         service = RegistrationService(
             session_maker=FakeSessionMaker(),
             user_repository=FakeUserRepository(),
-            token_verifier=get_token_verifier("secret"),
+            token_verifier=get_token_verifier(self.factory.public_key_pem()),
             admin_ids=[42],
         )
-        token = make_token("secret")
+        token = self.factory.make_token()
         result = await service.handle_start(tg_id=100, username="user", token=token)
         self.assertTrue(result.token_provided)
         self.assertTrue(result.token_valid)
