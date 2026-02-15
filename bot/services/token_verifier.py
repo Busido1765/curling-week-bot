@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import asyncio
 import json
 import logging
 import subprocess
@@ -14,6 +15,9 @@ logger = logging.getLogger(__name__)
 class TokenVerifier:
     def is_valid(self, token: str) -> bool:
         raise NotImplementedError
+
+    async def is_valid_async(self, token: str) -> bool:
+        return await asyncio.to_thread(self.is_valid, token)
 
 
 class JwtRs256TokenVerifier(TokenVerifier):
