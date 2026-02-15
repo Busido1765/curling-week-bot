@@ -204,6 +204,21 @@ class TestJwtTokenVerifier(unittest.TestCase):
         self.assertFalse(verifier.is_valid(token))
 
 
+class TestJwtTokenVerifierAsync(unittest.IsolatedAsyncioTestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.factory = RsaTokenFactory()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.factory.close()
+
+    async def test_valid_token_async(self) -> None:
+        verifier = get_token_verifier(self.factory.public_key_pem())
+        token = self.factory.make_token()
+        self.assertTrue(await verifier.is_valid_async(token))
+
+
 class TestRegistrationAdminBypass(unittest.IsolatedAsyncioTestCase):
     @classmethod
     def setUpClass(cls) -> None:

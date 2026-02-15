@@ -82,7 +82,7 @@ class RegistrationService:
                         token_valid=None,
                     )
 
-                token_valid = self._token_verifier.is_valid(token)
+                token_valid = await self._token_verifier.is_valid_async(token)
                 logger.info(
                     "Token validation for tg_id=%s token_valid=%s",
                     tg_id,
