@@ -219,7 +219,7 @@ class TestRegistrationAdminBypass(unittest.IsolatedAsyncioTestCase):
     def tearDownClass(cls) -> None:
         cls.factory.close()
 
-    async def test_non_admin_without_token_is_rejected(self) -> None:
+    async def test_non_admin_without_token_is_allowed_temporarily(self) -> None:
         service = RegistrationService(
             session_maker=FakeSessionMaker(),
             user_repository=FakeUserRepository(),
@@ -227,9 +227,9 @@ class TestRegistrationAdminBypass(unittest.IsolatedAsyncioTestCase):
             admin_ids=[42],
         )
         result = await service.handle_start(tg_id=100, username="user", token=None)
-        self.assertFalse(result.token_provided)
-        self.assertIsNone(result.token_valid)
-        self.assertEqual(result.current_status, RegistrationStatus.NONE)
+        self.assertTrue(result.token_provided)
+        self.assertTrue(result.token_valid)
+        self.assertEqual(result.current_status, RegistrationStatus.TOKEN_VERIFIED)
 
     async def test_admin_without_token_is_allowed(self) -> None:
         service = RegistrationService(

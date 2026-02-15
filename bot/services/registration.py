@@ -65,12 +65,24 @@ class RegistrationService:
                             token_valid=True,
                         )
 
-                    await self._user_repository.set_status(
-                        session, user, RegistrationStatus.NONE
-                    )
+                    # NOTE: Временно отключили обязательную токен-проверку для обычных
+                    # пользователей. Оставляем прежнюю реализацию ниже в комментарии,
+                    # чтобы можно было быстро вернуть строгий вход по токену.
+                    #
+                    # await self._user_repository.set_status(
+                    #     session, user, RegistrationStatus.NONE
+                    # )
+
+                    if user.status in {
+                        RegistrationStatus.NONE,
+                        RegistrationStatus.TOKEN_VERIFIED,
+                    }:
+                        await self._user_repository.set_status(
+                            session, user, RegistrationStatus.TOKEN_VERIFIED
+                        )
                     current_status = user.status
                     logger.info(
-                        "Start without token for tg_id=%s status=%s -> %s",
+                        "Start without token (user bypass enabled) for tg_id=%s status=%s -> %s",
                         tg_id,
                         previous_status.value,
                         current_status.value,
@@ -78,8 +90,8 @@ class RegistrationService:
                     return StartResult(
                         previous_status=previous_status,
                         current_status=current_status,
-                        token_provided=False,
-                        token_valid=None,
+                        token_provided=True,
+                        token_valid=True,
                     )
 
                 token_valid = self._token_verifier.is_valid(token)
