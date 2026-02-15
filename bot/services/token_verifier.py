@@ -58,8 +58,6 @@ class JwtRs256TokenVerifier(TokenVerifier):
 
         if exp <= now:
             return False
-        if iat > now + 60:
-            return False
 
         aud = payload.get("aud")
         if isinstance(aud, str):

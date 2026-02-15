@@ -198,6 +198,12 @@ class TestJwtTokenVerifier(unittest.TestCase):
         bad_token = f"{header_b64}.{tampered_payload_b64}.{b64url(sig_path.read_bytes())}"
         self.assertFalse(verifier.is_valid(bad_token))
 
+
+    def test_accepts_token_with_future_iat_from_site(self) -> None:
+        verifier = get_token_verifier(self.factory.public_key_pem())
+        now = int(time.time())
+        token = self.factory.make_token(payload={"iat": now + 86400, "exp": now + 86400 + 300})
+        self.assertTrue(verifier.is_valid(token))
     def test_rejects_non_rs256_header(self) -> None:
         verifier = get_token_verifier(self.factory.public_key_pem())
         token = self.factory.make_token(alg="HS256")
