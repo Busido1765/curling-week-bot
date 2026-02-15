@@ -2,7 +2,7 @@ import logging
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.filters import CommandStart, StateFilter
+from aiogram.filters import CommandObject, CommandStart, StateFilter
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from bot.keyboards import (
@@ -30,23 +30,25 @@ from bot.services.user_status import UserStatusService
 from bot.services.page_editing import PageEditingService
 from bot.storage import UserRepository
 from bot.handlers.admin import PageEditingStates, PostCreationStates
+from bot.utils.deep_link import extract_start_token
 
 router = Router()
 logger = logging.getLogger(__name__)
 
 
 @router.message(CommandStart())
-async def start_handler(message: Message) -> None:
+async def start_handler(message: Message, command: CommandObject) -> None:
     logger.info("DEBUG: start_handler triggered")
-    token = None
-    if message.text:
-        parts = message.text.split(maxsplit=1)
-        if len(parts) > 1:
-            token = parts[1]
+    token = extract_start_token(message.text, command.args)
 
     tg_id = message.from_user.id if message.from_user else 0
     username = message.from_user.username if message.from_user else None
-    logger.info("Received /start tg_id=%s token_provided=%s", tg_id, token is not None)
+    logger.info(
+        "Received /start tg_id=%s token_provided=%s token_length=%s",
+        tg_id,
+        token is not None,
+        len(token) if token else 0,
+    )
 
     service = RegistrationService(
         session_maker=message.bot.session_maker,

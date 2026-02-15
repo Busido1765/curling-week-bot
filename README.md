@@ -50,7 +50,10 @@ docker compose up --build
 
 Бот ожидает, что сайт передаёт токен в deep-link Telegram:
 
-- Формат ссылки: `https://t.me/<bot_username>?start=<jwt_token>`
+- Формат ссылки: `https://t.me/<bot_username>?start=<payload>`
+- Важно: Telegram принимает в `start` только URL-safe payload (`A-Z`, `a-z`, `0-9`, `_`, `-`) длиной до 64 символов.
+  Поэтому «сырой» JWT обычно не подходит. Рекомендуемый вариант — передавать JWT в виде base64url payload.
+- Бот поддерживает оба варианта: raw JWT (для обратной совместимости) и base64url-encoded payload.
 - Алгоритм подписи: `RS256`
 - Публичный ключ: `JWT_PUBLIC_KEY` из `.env` (PEM, допускается формат с `\n`)
 
@@ -95,4 +98,3 @@ JWT_PUBLIC_KEY="-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIB
 ADMIN_IDS=123456789,987654321
 REQUIRED_CHANNELS=[{"id":-1001234567890,"title":"Новости","url":"https://t.me/channel1"}]
 ```
-
