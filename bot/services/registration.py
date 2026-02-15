@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import Iterable
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -26,10 +27,12 @@ class RegistrationService:
         session_maker: async_sessionmaker[AsyncSession],
         user_repository: UserRepository,
         token_verifier: TokenVerifier,
+        admin_ids: Iterable[int] | None = None,
     ) -> None:
         self._session_maker = session_maker
         self._user_repository = user_repository
         self._token_verifier = token_verifier
+        self._admin_ids = set(admin_ids or [])
 
     async def handle_start(
         self, tg_id: int, username: str | None, token: str | None
@@ -40,6 +43,28 @@ class RegistrationService:
                 previous_status = user.status
 
                 if token is None:
+                    if tg_id in self._admin_ids:
+                        if user.status in {
+                            RegistrationStatus.NONE,
+                            RegistrationStatus.TOKEN_VERIFIED,
+                        }:
+                            await self._user_repository.set_status(
+                                session, user, RegistrationStatus.TOKEN_VERIFIED
+                            )
+                        current_status = user.status
+                        logger.info(
+                            "Admin start without token for tg_id=%s status=%s -> %s",
+                            tg_id,
+                            previous_status.value,
+                            current_status.value,
+                        )
+                        return StartResult(
+                            previous_status=previous_status,
+                            current_status=current_status,
+                            token_provided=True,
+                            token_valid=True,
+                        )
+
                     await self._user_repository.set_status(
                         session, user, RegistrationStatus.NONE
                     )
