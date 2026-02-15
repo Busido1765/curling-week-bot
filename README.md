@@ -45,3 +45,54 @@ docker compose up --build
 ## Переменные окружения
 
 Список обязательных переменных см. в `.env.example`.
+
+## Аутентификация по токену сайта (JWT RS256)
+
+Бот ожидает, что сайт передаёт токен в deep-link Telegram:
+
+- Формат ссылки: `https://t.me/<bot_username>?start=<jwt_token>`
+- Алгоритм подписи: `RS256`
+- Публичный ключ: `JWT_PUBLIC_KEY` из `.env` (PEM, допускается формат с `\n`)
+
+### Минимальная модель данных payload (JSON)
+
+```json
+{
+  "sub": "site_user_id",
+  "iat": 1730000000,
+  "exp": 1730000300,
+  "aud": "curling-week-bot"
+}
+```
+
+Где:
+
+- `sub` — идентификатор пользователя на стороне сайта.
+- `iat` — время выпуска токена (Unix timestamp, секунды).
+- `exp` — время истечения токена (Unix timestamp, секунды).
+- `aud` — аудитория токена, должна быть `curling-week-bot`.
+
+Токен считается невалидным, если:
+
+- отсутствует хотя бы один из обязательных клеймов (`sub`, `iat`, `exp`, `aud`),
+- `exp` уже истёк,
+- `aud` не совпадает,
+- подпись не проходит проверку `RS256` по `JWT_PUBLIC_KEY`.
+
+### Поведение администратора (вход без токена)
+
+Если пользователь входит в список `ADMIN_IDS`, он может запустить `/start` без токена.
+
+- Для администратора это считается разрешённым входом.
+- Для обычного пользователя без токена сохраняется стандартный сценарий с регистрацией на сайте.
+
+### Пример `.env`
+
+```env
+BOT_TOKEN=replace_with_bot_token
+DATABASE_URL=postgresql+asyncpg://curling_user:curling_password@postgres:5432/curling_db
+JWT_PUBLIC_KEY="-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtestkeyreplace\n-----END PUBLIC KEY-----"
+ADMIN_IDS=123456789,987654321
+REQUIRED_CHANNELS=[{"id":-1001234567890,"title":"Новости","url":"https://t.me/channel1"}]
+```
+

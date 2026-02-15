@@ -20,7 +20,7 @@ class RequiredChannel(BaseModel):
 class Settings(BaseSettings):
     bot_token: str
     database_url: str
-    jwt_secret: str
+    jwt_public_key: str
     admin_ids: List[int]
     required_channels: List[RequiredChannel] = Field(
         default_factory=list,

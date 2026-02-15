@@ -51,7 +51,8 @@ async def start_handler(message: Message) -> None:
     service = RegistrationService(
         session_maker=message.bot.session_maker,
         user_repository=UserRepository(),
-        token_verifier=get_token_verifier(),
+        token_verifier=get_token_verifier(message.bot.settings.jwt_public_key),
+        admin_ids=message.bot.settings.admin_ids,
     )
     result = await service.handle_start(tg_id=tg_id, username=username, token=token)
 
